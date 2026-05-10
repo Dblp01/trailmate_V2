@@ -9,6 +9,7 @@ TrailMate utilise des fonctions Netlify:
 - `/.netlify/functions/claude` pour l'IA
 - `/.netlify/functions/strava-token` pour l'echange OAuth Strava
 - `/.netlify/functions/config` pour exposer seulement la configuration publique
+- `/.netlify/functions/data` pour synchroniser les plans, seances, objectifs et bilans entre appareils
 
 Un simple deploiement GitHub Pages ne suffit donc pas pour l'IA et Strava. Deploie le dossier sur Netlify.
 
@@ -23,6 +24,7 @@ Un simple deploiement GitHub Pages ne suffit donc pas pour l'IA et Strava. Deplo
 4. Deploie le site.
 
 Une fois deployee, l'app est utilisable 24/7 avec une URL Netlify. Chaque navigateur garde ses propres donnees locales et ses propres profils.
+Les donnees sportives partagees sont synchronisees via Netlify Blobs. Les tokens Strava restent locaux au navigateur.
 
 ## Lancer en local
 
@@ -53,3 +55,6 @@ Exemple: si ton site est `https://trailmate-demo.netlify.app`, le domaine du rap
 - Coach IA: conversation avec le contexte de tes donnees
 - Objectifs: calendrier de courses avec compte a rebours
 - Profils: bascule entre Toi et Lonny avec donnees separees
+- Cloud: plans, seances, objectifs et bilans partages entre appareils
+- Bilan IA: resume hebdomadaire coach depuis le tableau de bord
+- Plans modifiables: coche les seances faites et regenere une semaine par IA

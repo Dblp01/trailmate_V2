@@ -24,6 +24,7 @@ const mime = {
 const functions = {
   claude: require('./netlify/functions/claude').handler,
   config: require('./netlify/functions/config').handler,
+  data: require('./netlify/functions/data').handler,
   'strava-token': require('./netlify/functions/strava-token').handler
 };
 
