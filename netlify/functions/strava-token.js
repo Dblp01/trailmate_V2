@@ -8,8 +8,8 @@ exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return { statusCode: 405, headers, body: 'Method Not Allowed' };
   try {
     const { code, refresh_token, grant_type, client_id, client_secret } = JSON.parse(event.body);
-    const clientId = process.env.STRAVA_CLIENT_ID || client_id;
-    const clientSecret = process.env.STRAVA_CLIENT_SECRET || client_secret;
+    const clientId = client_id || process.env.STRAVA_CLIENT_ID;
+    const clientSecret = client_secret || process.env.STRAVA_CLIENT_SECRET;
     if (!clientId || !clientSecret) {
       return {
         statusCode: 500,

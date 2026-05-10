@@ -574,6 +574,7 @@ select.fi{cursor:pointer}
     <div class="fg"><label class="fl">Client Secret</label><input class="fi" id="strava-client-secret" type="password" placeholder="abc123…"></div>
     <div class="modal-footer">
       <button class="btn btn-g" onclick="closeModal('modal-strava-config')">Annuler</button>
+      <button class="btn btn-d" onclick="clearProfileStravaConfig()">Réinitialiser</button>
       <button class="btn btn-strava" onclick="saveStravaConfig()">
         <svg viewBox="0 0 24 24" fill="currentColor" width="13" height="13"><path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0l-7 13.828h4.169"/></svg>
         Enregistrer & connecter
@@ -1596,6 +1597,15 @@ function saveStravaConfig(){
   if(sec) localStorage.setItem(storageKey('strava_secret'), sec);
   closeModal('modal-strava-config');
   stravaLogin();
+}
+
+function clearProfileStravaConfig(){
+  ['strava_id','strava_secret','strava_token','strava_refresh','strava_athlete'].forEach(k => localStorage.removeItem(storageKey(k)));
+  stravaToken = '';
+  stravaAthlete = null;
+  fillStravaConfigModal();
+  updateStravaUI();
+  renderStravaPage();
 }
 
 function stravaLogin(){
