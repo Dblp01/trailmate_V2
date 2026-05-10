@@ -48,6 +48,8 @@ Sur https://www.strava.com/settings/api :
 
 Exemple: si ton site est `https://trailmate-demo.netlify.app`, le domaine du rappel est `trailmate-demo.netlify.app`.
 
+Par defaut, une app Strava non revue peut etre limitee a un seul athlete connecte. Pour connecter plusieurs comptes avec la meme app Strava, demande une augmentation de quota/revue a Strava. En attendant, chaque athlete peut creer sa propre app Strava et saisir son Client ID/Secret dans TrailMate > Strava > Configurer.
+
 ## Utilisation
 
 - Plans IA: creation de plans semaine par semaine

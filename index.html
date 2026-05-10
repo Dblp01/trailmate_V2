@@ -1569,7 +1569,7 @@ function chatKey(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sen
 // ═══════════════════════════════════════════
 function getStravaConfig(){
   return {
-    clientId:     serverConfig.stravaClientId || localStorage.getItem('tm_strava_id') || localStorage.getItem(storageKey('strava_id')) || '',
+    clientId:     localStorage.getItem('tm_strava_id') || localStorage.getItem(storageKey('strava_id')) || serverConfig.stravaClientId || '',
     clientSecret: localStorage.getItem('tm_strava_secret') || localStorage.getItem(storageKey('strava_secret')) || '',
   };
 }
