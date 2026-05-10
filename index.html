@@ -209,17 +209,25 @@ select.fi{cursor:pointer}
 /* PLAN VIEW */
 .plan-week{margin-bottom:12px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
 .pw-hd{padding:11px 15px;background:var(--bg3);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
-.pw-body{padding:10px 12px;display:flex;flex-direction:column;gap:6px}
-.ps{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;background:var(--bg3);border-radius:var(--rs);border:1px solid var(--border)}
-.ps-icon{width:36px;height:36px;border-radius:var(--rs);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.pw-body{padding:12px;display:grid;grid-template-columns:1fr;gap:10px}
+.ps{display:grid;grid-template-columns:42px 1fr;gap:11px;align-items:flex-start;padding:12px;background:var(--bg3);border-radius:var(--r);border:1px solid var(--border)}
+.ps.done{opacity:.72;border-color:var(--gbr);background:linear-gradient(135deg,var(--gb),var(--bg3))}
+.ps-icon{width:42px;height:42px;border-radius:var(--rs);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
 .ps-body{flex:1;min-width:0}
 .ps-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}
 .ps-day{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;min-width:28px}
 .ps-type{font-size:13px;font-weight:600}
 .ps-zone{font-size:10px;font-weight:600;color:var(--text3);background:var(--bg4);border:1px solid var(--border);padding:1px 7px;border-radius:20px}
 .ps-stats{margin-left:auto;display:flex;gap:8px;font-size:11px;color:var(--text3);flex-wrap:wrap}
-.ps-desc{font-size:12px;color:var(--text2);line-height:1.55}
-.ps-conseil{font-size:11px;color:var(--g);margin-top:5px;font-style:italic}
+.ps-desc{font-size:12px;color:var(--text2);line-height:1.6;margin-top:7px;padding:9px 10px;background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:var(--rs)}
+.ps-conseil{font-size:12px;color:var(--g);margin-top:8px;line-height:1.55;padding:9px 10px;background:var(--gb);border:1px solid var(--gbr);border-radius:var(--rs)}
+.ps-detail{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:9px}
+.ps-metric{background:var(--bg2);border:1px solid var(--border);border-radius:var(--rs);padding:8px}
+.ps-ml{font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:2px}
+.ps-mv{font-size:13px;color:var(--text);font-weight:600}
+.ps-feedback{margin-top:9px;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end}
+.ps-feedback textarea{min-height:44px;font-size:12px}
+.ps-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
 
 /* STRAVA */
 .strava-connect-box{background:var(--stravab);border:1px solid rgba(252,76,2,.22);border-radius:var(--r);padding:20px;text-align:center;margin-bottom:16px}
@@ -281,6 +289,9 @@ select.fi{cursor:pointer}
   .ps{padding:9px;gap:8px}
   .ps-icon{width:32px;height:32px}
   .ps-stats{margin-left:0;width:100%}
+  .ps-detail{grid-template-columns:1fr}
+  .ps-feedback{grid-template-columns:1fr}
+  .ps-feedback .btn{justify-content:center}
   .cm{padding:14px;gap:9px}
   .mac,.muc{max-width:92%;font-size:13px}
   .cia{padding:10px 12px}
@@ -1077,22 +1088,30 @@ function viewPlan(id){
       <div class="pw-body">`;
     (sem.seances||[]).forEach((s,si) => {
       const st = sStyle(s.type);
-      html += `<div class="ps" style="${s.done?'opacity:.68':''}">
+      const safeNote = String(s.feedback || '').replace(/"/g,'&quot;');
+      html += `<div class="ps ${s.done?'done':''}">
         <div class="ps-icon" style="background:${st.bg};border:1px solid ${st.border}">${st.icon}</div>
         <div class="ps-body">
           <div class="ps-top">
             <span class="ps-day">${s.jour||''}</span>
             <span class="ps-type" style="color:${st.color};${s.done?'text-decoration:line-through':''}">${s.type||''}</span>
             ${s.zone ? `<span class="ps-zone">${s.zone}</span>` : ''}
-            <span class="ps-stats">
-              ${s.duree       ? `<span>⏱ ${s.duree}</span>` : ''}
-              ${s.distance_km ? `<span>📍 ${s.distance_km}km</span>` : ''}
-              ${s.denivele_m  ? `<span>⬆ ${s.denivele_m}m+</span>` : ''}
-            </span>
-            <button class="btn ${s.done?'btn-g':'btn-p'} btn-sm" onclick="togglePlanSession(${id},${wi},${si})">${s.done?'Fait':'À faire'}</button>
+          </div>
+          <div class="ps-detail">
+            <div class="ps-metric"><div class="ps-ml">Durée</div><div class="ps-mv">${s.duree||'À ajuster'}</div></div>
+            <div class="ps-metric"><div class="ps-ml">Distance</div><div class="ps-mv">${s.distance_km?`${s.distance_km} km`:'Libre'}</div></div>
+            <div class="ps-metric"><div class="ps-ml">Dénivelé</div><div class="ps-mv">${s.denivele_m?`${s.denivele_m} m+`:'Selon terrain'}</div></div>
           </div>
           <div class="ps-desc">${s.description||''}</div>
-          ${s.conseil ? `<div class="ps-conseil">💡 ${s.conseil}</div>` : ''}
+          ${s.conseil ? `<div class="ps-conseil"><strong>Conseil coach</strong><br>${s.conseil}</div>` : ''}
+          <div class="ps-feedback">
+            <textarea class="fi" id="pf-${id}-${wi}-${si}" placeholder="Ressenti après séance : jambes, souffle, douleur, météo..." oninput="updatePlanFeedback(${id},${wi},${si},this.value)">${safeNote}</textarea>
+            <button class="btn ${s.done?'btn-g':'btn-p'} btn-sm" onclick="togglePlanSession(${id},${wi},${si})">${s.done?'Fait':'À faire'}</button>
+          </div>
+          <div class="ps-actions">
+            <button class="btn btn-g btn-sm" onclick="copyPlanSessionToDone(${id},${wi},${si})">Ajouter aux séances</button>
+            ${s.doneAt ? `<span style="font-size:11px;color:var(--text3);align-self:center">Fait le ${new Date(s.doneAt).toLocaleDateString('fr')}</span>` : ''}
+          </div>
         </div>
       </div>`;
     });
@@ -1111,6 +1130,39 @@ function togglePlanSession(planId, weekIndex, sessionIndex){
   s.doneAt = s.done ? new Date().toISOString() : '';
   save('plans');
   renderPlans(); renderDash(); viewPlan(planId);
+}
+
+function updatePlanFeedback(planId, weekIndex, sessionIndex, value){
+  const p = DB.plans.find(x => x.id === planId);
+  const s = p?.data?.semaines?.[weekIndex]?.seances?.[sessionIndex];
+  if(!s) return;
+  s.feedback = value;
+  save('plans');
+}
+
+function copyPlanSessionToDone(planId, weekIndex, sessionIndex){
+  const p = DB.plans.find(x => x.id === planId);
+  const s = p?.data?.semaines?.[weekIndex]?.seances?.[sessionIndex];
+  if(!s) return;
+  const today = tod();
+  DB.sessions.push({
+    id: Date.now(),
+    plan_id: planId,
+    type: s.type || 'Séance planifiée',
+    date: today,
+    km: Number(s.distance_km)||0,
+    dur: s.duree || '',
+    elev: Number(s.denivele_m)||0,
+    hr: 0,
+    notes: s.feedback || s.description || '',
+    feedback: s.conseil || '',
+    source: 'plan'
+  });
+  s.done = true;
+  s.doneAt = new Date().toISOString();
+  save('sessions');
+  save('plans');
+  renderPlans(); renderSessions(); renderDash(); viewPlan(planId);
 }
 
 async function regenerateWeek(planId, weekIndex){
