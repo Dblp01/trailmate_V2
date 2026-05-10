@@ -808,8 +808,19 @@ function go(id){
   if(id === 'strava')    renderStravaPage();
 }
 
-function openModal(id){ document.getElementById(id).classList.add('on'); }
+function openModal(id){
+  if(id === 'modal-strava-config') fillStravaConfigModal();
+  document.getElementById(id).classList.add('on');
+}
 function closeModal(id){ document.getElementById(id).classList.remove('on'); }
+
+function fillStravaConfigModal(){
+  const idEl = document.getElementById('strava-client-id');
+  const secEl = document.getElementById('strava-client-secret');
+  if(!idEl || !secEl) return;
+  idEl.value = localStorage.getItem(storageKey('strava_id')) || '';
+  secEl.value = localStorage.getItem(storageKey('strava_secret')) || '';
+}
 
 // ═══════════════════════════════════════════
 // CLAUDE API
@@ -1568,9 +1579,12 @@ function chatKey(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sen
 // STRAVA OAUTH
 // ═══════════════════════════════════════════
 function getStravaConfig(){
+  const profileId = localStorage.getItem(storageKey('strava_id')) || '';
+  const globalId = localStorage.getItem('tm_strava_id') || '';
   return {
-    clientId:     localStorage.getItem('tm_strava_id') || localStorage.getItem(storageKey('strava_id')) || serverConfig.stravaClientId || '',
-    clientSecret: localStorage.getItem('tm_strava_secret') || localStorage.getItem(storageKey('strava_secret')) || '',
+    clientId:     profileId || globalId || serverConfig.stravaClientId || '',
+    clientSecret: localStorage.getItem(storageKey('strava_secret')) || localStorage.getItem('tm_strava_secret') || '',
+    source:       profileId ? 'profil' : globalId ? 'navigateur' : serverConfig.stravaClientId ? 'Netlify' : 'aucune'
   };
 }
 
@@ -1578,15 +1592,20 @@ function saveStravaConfig(){
   const id  = document.getElementById('strava-client-id').value.trim();
   const sec = document.getElementById('strava-client-secret').value.trim();
   if(!id){ alert('Remplis le Client ID !'); return; }
-  localStorage.setItem('tm_strava_id',     id);
-  if(sec) localStorage.setItem('tm_strava_secret', sec);
+  localStorage.setItem(storageKey('strava_id'), id);
+  if(sec) localStorage.setItem(storageKey('strava_secret'), sec);
   closeModal('modal-strava-config');
   stravaLogin();
 }
 
 function stravaLogin(){
-  const { clientId } = getStravaConfig();
+  const { clientId, source } = getStravaConfig();
   if(!clientId){ openModal('modal-strava-config'); return; }
+  if(source !== 'profil' && activeProfile === 'lonny'){
+    alert('Pour Lonny, clique d’abord sur Configurer Strava et mets son Client ID/Secret à lui. Sinon Strava utilise ton app limitée à 1 athlète.');
+    openModal('modal-strava-config');
+    return;
+  }
   const redirect = encodeURIComponent(APP_BASE_URL);
   const scope    = 'read,activity:read';
   window.location.href = `https://www.strava.com/oauth/authorize?client_id=${clientId}&response_type=code&redirect_uri=${redirect}&scope=${scope}&approval_prompt=auto`;
@@ -1674,26 +1693,28 @@ function renderStravaPage(){
   const sub  = document.getElementById('strava-sub');
   const btns = document.getElementById('strava-topbar-btns');
   const cont = document.getElementById('strava-content');
+  const cfg = getStravaConfig();
 
   if(!stravaToken){
     sub.textContent = 'Non connecté';
-    btns.innerHTML  = '';
+    btns.innerHTML  = `<button class="btn btn-g btn-sm" onclick="openModal('modal-strava-config')">Configurer Strava</button>`;
     cont.innerHTML  = `<div class="strava-connect-box">
       <div class="strava-logo-big"><svg viewBox="0 0 24 24" fill="white"><path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0l-7 13.828h4.169"/></svg></div>
       <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">Connecte Strava</div>
       <div style="font-size:13px;color:var(--text2);line-height:1.6;max-width:300px;margin:0 auto 18px">Synchronise automatiquement tes courses et trails. Le coach IA analysera tes séances réelles.</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:14px">Config utilisée : <span style="color:${cfg.source==='profil'?'var(--g)':'var(--amber)'}">${cfg.source}</span>${cfg.clientId ? ` · Client ID ${String(cfg.clientId).slice(0,4)}…` : ''}</div>
       <button class="btn btn-strava" onclick="stravaLogin()" style="padding:10px 24px;font-size:13px">
         <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0l-7 13.828h4.169"/></svg>
         Se connecter avec Strava
       </button>
-      <div style="font-size:11px;color:var(--text3);margin-top:12px"><a href="#" onclick="openModal('modal-strava-config');return false" style="color:var(--strava)">Configurer Client ID/Secret</a></div>
+      <div style="font-size:11px;color:var(--text3);margin-top:12px"><a href="#" onclick="openModal('modal-strava-config');return false" style="color:var(--strava)">Configurer Strava pour ce profil</a></div>
     </div>`;
     return;
   }
 
   const name = stravaAthlete ? (stravaAthlete.firstname+' '+stravaAthlete.lastname) : 'Athlète';
   sub.textContent = `Connecté · ${name}`;
-  btns.innerHTML  = `<button class="btn btn-g btn-sm" onclick="syncStrava()">Synchroniser</button><button class="btn btn-d btn-sm" onclick="stravaLogout()">Déconnecter</button>`;
+  btns.innerHTML  = `<button class="btn btn-g btn-sm" onclick="openModal('modal-strava-config')">Configurer</button><button class="btn btn-g btn-sm" onclick="syncStrava()">Synchroniser</button><button class="btn btn-d btn-sm" onclick="stravaLogout()">Déconnecter</button>`;
 
   const stravaSess = DB.sessions.filter(s => s.source==='strava').sort((a,b) => new Date(b.date)-new Date(a.date));
   if(!stravaSess.length){
