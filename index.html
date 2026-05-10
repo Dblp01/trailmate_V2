@@ -228,6 +228,12 @@ select.fi{cursor:pointer}
 .ps-feedback{margin-top:9px;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end}
 .ps-feedback textarea{min-height:44px;font-size:12px}
 .ps-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.ps-toggle{background:transparent;border:none;color:var(--g);font-size:12px;font-weight:600;cursor:pointer;padding:0;margin-top:8px}
+.ps-extra{display:none;margin-top:9px;padding-top:9px;border-top:1px solid var(--border)}
+.ps-extra.on{display:block}
+.ps-steps{font-size:12px;color:var(--text2);line-height:1.65;padding-left:17px;margin:0}
+.ps-steps li{margin-bottom:4px}
+.ps-feel{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px}
 
 /* STRAVA */
 .strava-connect-box{background:var(--stravab);border:1px solid rgba(252,76,2,.22);border-radius:var(--r);padding:20px;text-align:center;margin-bottom:16px}
@@ -282,7 +288,11 @@ select.fi{cursor:pointer}
   .cdbox{padding:13px 14px;align-items:flex-start}
   .cd-days{font-size:31px}
   .modal{width:100%;max-height:88dvh;padding:18px}
+  .modal-wide{width:100%;height:100dvh;max-height:100dvh;border-radius:0;padding:14px}
   .overlay{padding:12px;align-items:flex-end}
+  #modal-pv.overlay{padding:0;align-items:stretch}
+  #modal-pv .modal-hd{position:sticky;top:0;background:var(--bg2);z-index:2;padding-bottom:10px}
+  #pv-content{padding-bottom:22px}
   .modal-footer{position:sticky;bottom:-18px;background:var(--bg2);padding-top:12px;flex-wrap:wrap}
   .modal-footer .btn{flex:1;justify-content:center}
   .pw-hd{align-items:flex-start}
@@ -292,6 +302,7 @@ select.fi{cursor:pointer}
   .ps-detail{grid-template-columns:1fr}
   .ps-feedback{grid-template-columns:1fr}
   .ps-feedback .btn{justify-content:center}
+  .ps-feel{grid-template-columns:1fr}
   .cm{padding:14px;gap:9px}
   .mac,.muc{max-width:92%;font-size:13px}
   .cia{padding:10px 12px}
@@ -900,7 +911,7 @@ async function generatePlan(){
   const profile = PROFILES[activeProfile];
   const recent = [...DB.sessions].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,10);
   const avgKm4 = recent.length ? (recent.reduce((a,s)=>a+(Number(s.km)||0),0) / Math.min(4,recent.length)).toFixed(1) : 'inconnu';
-  const SYS   = 'Tu es un générateur strict de JSON pour une app de coaching trail. Réponds UNIQUEMENT avec un objet JSON valide. Pas de markdown, pas de backticks, pas de texte hors JSON.';
+  const SYS   = 'Tu es un entraîneur expert en trail, ultra-trail, physiologie de l’entraînement, planification de charge, dénivelé, nutrition et préparation montagne. Tu génères du JSON strict pour une app. Réponds UNIQUEMENT avec un objet JSON valide. Pas de markdown, pas de backticks, pas de texte hors JSON.';
 
   function mkPrompt(from, to, withMeta){
     const meta = withMeta ? `"resume":"stratégie globale en 2 phrases","phases":[{"nom":"Phase - Nom","semaines":"X-Y","objectif":"..."}],` : '';
@@ -909,6 +920,12 @@ Course cible: ${race}, ${dist||'?'}km, ${elev||'?'}m+, date ${date}.
 Niveau: ${level}. Fréquence: exactement ${dpw} séances par semaine. Objectif: ${goal||'finisher'}.
 Données récentes: moyenne approximative ${avgKm4}km sur les dernières séances enregistrées; dernières séances: ${recent.map(s=>`${s.date} ${s.type} ${s.km||'?'}km ${s.elev||0}m+`).join(' | ') || 'aucune'}.
 Contraintes: progression prudente, semaine allégée toutes les 4 semaines si possible, affûtage sur les 2 dernières semaines, aucune séance absurde pour le niveau, volume cohérent avec la distance et le dénivelé.
+Règles de cohérence obligatoires:
+- Allure trail réaliste: sortie facile 7-10 km/h selon dénivelé, sortie longue montagne 5-8 km/h selon dénivelé.
+- Ne propose jamais 2h30 pour 11km sauf si dénivelé très élevé (>1000m+) ou terrain technique; sinon ajuste distance ou durée.
+- Pour une course ${dist||'?'}km/${elev||'?'}m+, augmente progressivement les sorties longues vers 35-55% de la distance cible selon le niveau.
+- Le champ description doit expliquer quoi faire concrètement, pas une phrase générique.
+- Le champ conseil doit dire comment juger si la séance est réussie et quoi surveiller.
 Génère uniquement les semaines ${from} à ${to} sur un total de ${weeks} semaines. JSON EXACT:
 {${meta}"semaines":[{"numero":${from},"phase":"Base","volume_km":40,"denivele_m":600,"focus":"Endurance","seances":[{"jour":"Mar","type":"Endurance fondamentale","duree":"50min","distance_km":10,"denivele_m":100,"zone":"Z2","description":"Footing facile FC<140bpm","conseil":"Reste en Z2"}]}]}
 Types autorisés: Endurance fondamentale|Sortie longue|Fractionné|Côtes|Tempo|Récupération.
@@ -956,8 +973,8 @@ Chaque semaine doit contenir exactement ${dpw} séances. Chaque séance doit avo
         seances: (w.seances||[]).slice(0, Number(dpw)).map(s => ({
           jour: s.jour || 'Mar',
           type: s.type || 'Endurance fondamentale',
-          duree: s.duree || '45min',
-          distance_km: Math.max(0, Number(s.distance_km)||0),
+          duree: s.duree || inferDuration(s),
+          distance_km: Math.max(0, Number(s.distance_km)||inferDistance(s)),
           denivele_m: Math.max(0, Math.round(Number(s.denivele_m)||0)),
           zone: s.zone || 'Z2',
           description: s.description || 'Séance contrôlée.',
@@ -965,6 +982,21 @@ Chaque semaine doit contenir exactement ${dpw} séances. Chaque séance doit avo
         }))
       }));
     return data.semaines.length ? data : null;
+  }
+
+  function inferDistance(s){
+    const t = String(s.type||'').toLowerCase();
+    if(t.includes('longue')) return Math.max(14, Math.round((Number(dist)||50) * .28));
+    if(t.includes('fraction') || t.includes('côte') || t.includes('tempo')) return 8;
+    return 10;
+  }
+
+  function inferDuration(s){
+    const km = Number(s.distance_km) || inferDistance(s);
+    const elevM = Number(s.denivele_m)||0;
+    const hours = (km / 8) + (elevM / 700);
+    const minutes = Math.max(40, Math.round(hours * 60 / 5) * 5);
+    return minutes >= 90 ? `${Math.floor(minutes/60)}h${String(minutes%60).padStart(2,'0')}` : `${minutes}min`;
   }
 
   function fallbackPlan(){
@@ -975,23 +1007,24 @@ Chaque semaine doit contenir exactement ${dpw} séances. Chaque séance doit avo
       const progress = i / Math.max(1,weeks);
       const taper = i > weeks-2;
       const recovery = i % 4 === 0 && !taper;
-      const volume = taper ? baseKm * .55 : recovery ? baseKm * .75 : baseKm * (0.9 + progress * 0.55);
+      const volume = taper ? baseKm * .65 : recovery ? baseKm * .78 : baseKm * (1.0 + progress * 0.85);
       const elevWeek = Math.round(volume * Math.max(20, Number(elev||1200) / Math.max(1, Number(dist||40))) * (taper ? .55 : 1));
       const seances = [];
       const days = ['Mar','Jeu','Sam','Dim','Mer','Ven'];
       for(let j=0;j<Number(dpw);j++){
         const isLong = j === Math.min(3, Number(dpw)-1);
         const type = isLong ? 'Sortie longue' : types[(i+j)%types.length];
-        const kmS = Math.max(5, Math.round(volume * (isLong ? .38 : .62/(Number(dpw)-1 || 1))));
+        const kmS = Math.max(isLong ? 14 : 7, Math.round(volume * (isLong ? .42 : .58/(Number(dpw)-1 || 1))));
+        const elevS = Math.round(elevWeek * (isLong ? .48 : .52/(Number(dpw)-1 || 1)));
         seances.push({
           jour: days[j],
           type,
-          duree: isLong ? '2h00-3h30' : '45-75min',
+          duree: inferDuration({type, distance_km:kmS, denivele_m:elevS}),
           distance_km: kmS,
-          denivele_m: Math.round(elevWeek * (isLong ? .45 : .55/(Number(dpw)-1 || 1))),
+          denivele_m: elevS,
           zone: type === 'Fractionné' || type === 'Tempo' ? 'Z3-Z4' : 'Z2',
-          description: isLong ? 'Sortie spécifique trail, aisance respiratoire, terrain vallonné.' : 'Séance contrôlée avec échauffement et retour au calme.',
-          conseil: recovery ? 'Semaine allégée: garde de la fraîcheur.' : 'Priorise la régularité et la récupération.'
+          description: isLong ? `Sortie longue trail: ${kmS}km avec ${elevS}m+, départ facile, montées en gestion, tester hydratation/nutrition.` : `${type}: échauffement progressif, bloc principal maîtrisé, retour au calme. Rester propre techniquement.`,
+          conseil: recovery ? 'Semaine allégée: tu dois finir plus frais que fatigué.' : 'Séance réussie si tu respectes la zone et gardes une foulée propre jusqu’à la fin.'
         });
       }
       sems.push({ numero:i, phase:taper?'Affûtage':recovery?'Récupération':'Développement', volume_km:Math.round(volume), denivele_m:elevWeek, focus:taper?'Fraîcheur':'Progression trail', seances });
@@ -1089,6 +1122,8 @@ function viewPlan(id){
     (sem.seances||[]).forEach((s,si) => {
       const st = sStyle(s.type);
       const safeNote = String(s.feedback || '').replace(/"/g,'&quot;');
+      const steps = sessionSteps(s);
+      const extraId = `pex-${id}-${wi}-${si}`;
       html += `<div class="ps ${s.done?'done':''}">
         <div class="ps-icon" style="background:${st.bg};border:1px solid ${st.border}">${st.icon}</div>
         <div class="ps-body">
@@ -1104,6 +1139,15 @@ function viewPlan(id){
           </div>
           <div class="ps-desc">${s.description||''}</div>
           ${s.conseil ? `<div class="ps-conseil"><strong>Conseil coach</strong><br>${s.conseil}</div>` : ''}
+          <button class="ps-toggle" onclick="toggleSessionDetails('${extraId}')">Voir le détail de la séance</button>
+          <div class="ps-extra" id="${extraId}">
+            <div class="ps-ml">Déroulé recommandé</div>
+            <ol class="ps-steps">${steps.map(x => `<li>${x}</li>`).join('')}</ol>
+            <div class="ps-feel">
+              <div><label class="fl">Ressenti</label><select class="fi" onchange="updatePlanField(${id},${wi},${si},'feeling',this.value)"><option value="">Choisir</option>${['Très facile','Bien','Dur mais propre','Trop dur','Douleur / alerte'].map(v => `<option ${s.feeling===v?'selected':''}>${v}</option>`).join('')}</select></div>
+              <div><label class="fl">Fatigue</label><select class="fi" onchange="updatePlanField(${id},${wi},${si},'fatigue',this.value)"><option value="">Choisir</option>${['Faible','Normale','Élevée','Très élevée'].map(v => `<option ${s.fatigue===v?'selected':''}>${v}</option>`).join('')}</select></div>
+            </div>
+          </div>
           <div class="ps-feedback">
             <textarea class="fi" id="pf-${id}-${wi}-${si}" placeholder="Ressenti après séance : jambes, souffle, douleur, météo..." oninput="updatePlanFeedback(${id},${wi},${si},this.value)">${safeNote}</textarea>
             <button class="btn ${s.done?'btn-g':'btn-p'} btn-sm" onclick="togglePlanSession(${id},${wi},${si})">${s.done?'Fait':'À faire'}</button>
@@ -1122,6 +1166,21 @@ function viewPlan(id){
   openModal('modal-pv');
 }
 
+function sessionSteps(s){
+  const type = String(s.type||'').toLowerCase();
+  const dur = s.duree || 'durée prévue';
+  if(type.includes('fraction')) return ['15-20 min échauffement en aisance + 4 lignes droites progressives.', `Bloc principal: ${s.description || 'fractionné contrôlé, récupérations complètes'}.`, 'Retour au calme 10-15 min très facile.', 'Arrête la séance si la foulée se dégrade ou si une douleur apparaît.'];
+  if(type.includes('côte') || type.includes('côtes')) return ['20 min facile sur terrain progressif.', `Travail en montée: ${s.description || 'répétitions en côte, posture haute, appuis courts'}.`, 'Redescends en récupération souple, sans casser les quadriceps.', 'Finis par 10 min faciles et mobilité mollets/quadriceps.'];
+  if(type.includes('tempo')) return ['15 min facile + éducatifs légers.', `Bloc tempo: effort soutenu mais maîtrisé, ${dur}, respiration contrôlée.`, 'Tu dois pouvoir finir fort sans sprinter.', '10 min retour au calme.'];
+  if(type.includes('longue')) return ['Départ très facile les 30 premières minutes.', `Objectif: ${s.description || 'temps en endurance sur terrain trail'}.`, 'Teste hydratation et nutrition comme en course.', 'Garde les montées en gestion, relance seulement si tu es frais sur la fin.'];
+  if(type.includes('récup')) return ['Tout en aisance, sans chercher l’allure.', 'Terrain facile, foulée relâchée.', 'Si fatigue élevée: transforme en marche active ou repos.', 'Finis avec 5 min de mobilité.'];
+  return ['10-15 min échauffement facile.', `Corps de séance: ${s.description || 'endurance fondamentale régulière'}.`, 'Reste dans la zone prévue, sans forcer l’allure.', 'Retour au calme 5-10 min.'];
+}
+
+function toggleSessionDetails(id){
+  document.getElementById(id)?.classList.toggle('on');
+}
+
 function togglePlanSession(planId, weekIndex, sessionIndex){
   const p = DB.plans.find(x => x.id === planId);
   const s = p?.data?.semaines?.[weekIndex]?.seances?.[sessionIndex];
@@ -1137,6 +1196,14 @@ function updatePlanFeedback(planId, weekIndex, sessionIndex, value){
   const s = p?.data?.semaines?.[weekIndex]?.seances?.[sessionIndex];
   if(!s) return;
   s.feedback = value;
+  save('plans');
+}
+
+function updatePlanField(planId, weekIndex, sessionIndex, field, value){
+  const p = DB.plans.find(x => x.id === planId);
+  const s = p?.data?.semaines?.[weekIndex]?.seances?.[sessionIndex];
+  if(!s) return;
+  s[field] = value;
   save('plans');
 }
 
@@ -1174,11 +1241,12 @@ async function regenerateWeek(planId, weekIndex){
   const oldTitle = document.getElementById('pv-title').textContent;
   document.getElementById('pv-title').textContent = 'Régénération de la semaine…';
   try{
-    const raw = await claude([{role:'user', content:`Renvoie uniquement un JSON valide pour remplacer cette semaine de plan trail.
+    const raw = await claude([{role:'user', content:`Tu es entraîneur expert trail/ultra-trail. Renvoie uniquement un JSON valide pour remplacer cette semaine de plan trail.
 Plan: ${p.name}, course ${p.race}, ${p.dist||'?'}km ${p.elev||'?'}m+, niveau ${p.level}, ${p.dpw} séances/semaine.
 Semaine à remplacer: ${JSON.stringify(week)}.
 Demande utilisateur: ${note || 'améliore la cohérence de la semaine'}.
-Format exact: {"numero":${week.numero},"phase":"...","volume_km":40,"denivele_m":800,"focus":"...","seances":[{"jour":"Mar","type":"Endurance fondamentale","duree":"50min","distance_km":10,"denivele_m":100,"zone":"Z2","description":"...","conseil":"..."}]}`}], 'Réponds uniquement avec un objet JSON valide, sans markdown.', 2500);
+Règles: distances et durées cohérentes; sortie longue jamais 2h30 pour 11km sauf >1000m+; descriptions concrètes; conseils coach utiles; exactement ${p.dpw} séances.
+Format exact: {"numero":${week.numero},"phase":"...","volume_km":40,"denivele_m":800,"focus":"...","seances":[{"jour":"Mar","type":"Endurance fondamentale","duree":"50min","distance_km":10,"denivele_m":100,"zone":"Z2","description":"déroulé concret","conseil":"critère de réussite + point de vigilance"}]}`}], 'Réponds uniquement avec un objet JSON valide, sans markdown.', 3000);
     const cleaned = raw.replace(/```(?:json)?/gi,'').replace(/```/g,'').trim();
     const match = cleaned.match(/\{[\s\S]*\}/);
     const nw = match ? JSON.parse(match[0]) : null;
