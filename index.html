@@ -923,7 +923,6 @@ async function generatePlan(){
   genBox.style.display = 'block';
 
   const weeks = Math.max(2, Math.round((new Date(date) - new Date()) / (7*24*3600*1000)));
-  const half  = Math.ceil(weeks / 2);
   const profile = PROFILES[activeProfile];
   const recent = [...DB.sessions].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,10);
   const avgKm4 = recent.length ? (recent.reduce((a,s)=>a+(Number(s.km)||0),0) / Math.min(4,recent.length)).toFixed(1) : 'inconnu';
@@ -1031,11 +1030,11 @@ Chaque semaine doit contenir exactement ${dpw} séances. Chaque séance doit avo
     return minutes >= 90 ? `${Math.floor(minutes/60)}h${String(minutes%60).padStart(2,'0')}` : `${minutes}min`;
   }
 
-  function fallbackPlan(){
+  function buildFallbackWeeks(from, to){
     const types = ['Endurance fondamentale','Côtes','Tempo','Sortie longue','Récupération','Fractionné'];
     const baseKm = Math.max(18, Number(dist||40) * 0.35);
     const sems = [];
-    for(let i=1;i<=weeks;i++){
+    for(let i=from;i<=to;i++){
       const progress = i / Math.max(1,weeks);
       const taper = i > weeks-2;
       const recovery = i % 4 === 0 && !taper;
@@ -1051,39 +1050,72 @@ Chaque semaine doit contenir exactement ${dpw} séances. Chaque séance doit avo
         seances.push({
           jour: days[j],
           type,
+          objectif: isLong ? 'Endurance spécifique trail, résistance musculaire et stratégie nutritionnelle' : `${type}: développer une qualité ciblée sans créer de surcharge inutile`,
           duree: inferDuration({type, distance_km:kmS, denivele_m:elevS}),
           distance_km: kmS,
           denivele_m: elevS,
+          intensite: type === 'Fractionné' || type === 'Tempo' ? 'Soutenu contrôlé' : 'Facile à modéré',
           zone: type === 'Fractionné' || type === 'Tempo' ? 'Z3-Z4' : 'Z2',
-          description: isLong ? `Sortie longue trail: ${kmS}km avec ${elevS}m+, départ facile, montées en gestion, tester hydratation/nutrition.` : `${type}: échauffement progressif, bloc principal maîtrisé, retour au calme. Rester propre techniquement.`,
+          allure: isLong ? 'Rando-course en aisance, montées gérées, relances souples' : 'Selon zone, jamais à bloc',
+          rpe: type === 'Fractionné' || type === 'Tempo' ? '6-8/10' : isLong ? '4-6/10' : '3-5/10',
+          recuperation: recovery ? '48h si fatigue élevée' : '24h minimum avant intensité',
+          description: isLong ? `Sortie longue trail: ${kmS}km avec ${elevS}m+, départ facile, montées en gestion, descentes propres, tester hydratation/nutrition.` : `${type}: séance structurée avec échauffement progressif, bloc principal maîtrisé, retour au calme. Rester propre techniquement.`,
+          echauffement: type === 'Récupération' ? '10min très facile' : '15-20min facile + mobilité hanches/chevilles + 3 accélérations progressives si intensité',
+          corps: isLong ? `${kmS}km trail en endurance, marcher les fortes pentes si nécessaire, travailler économie et régularité.` : type === 'Côtes' ? 'Répétitions en montée avec posture haute, poussée complète, récupération en descente souple.' : type === 'Tempo' ? 'Bloc tempo contrôlé, respiratoire soutenu mais stable, sans finir vidé.' : `${type} en respectant la zone prévue.`,
+          retour_calme: '8-12min très facile + mobilité légère',
+          technique: isLong ? 'Regard loin, appuis courts en descente, cadence régulière en montée.' : 'Foulée relâchée, gainage actif, appuis silencieux.',
+          nutrition: isLong ? 'Tester 40-70g glucides/h + 500-750ml/h selon chaleur.' : 'Hydratation simple; glucides seulement si séance >75min ou intensité forte.',
           conseil: recovery ? 'Semaine allégée: tu dois finir plus frais que fatigué.' : 'Séance réussie si tu respectes la zone et gardes une foulée propre jusqu’à la fin.'
         });
       }
-      sems.push({ numero:i, phase:taper?'Affûtage':recovery?'Récupération':'Développement', volume_km:Math.round(volume), denivele_m:elevWeek, focus:taper?'Fraîcheur':'Progression trail', seances });
+      sems.push({
+        numero:i,
+        phase:taper?'Affûtage':recovery?'Récupération':'Développement',
+        volume_km:Math.round(volume),
+        denivele_m:elevWeek,
+        charge: recovery?'allégée':taper?'réduite':'progressive',
+        focus:taper?'Fraîcheur':'Progression trail',
+        objectif: taper?'Assimiler la préparation et arriver frais':'Construire endurance, D+ et résistance musculaire sans surcharge brutale',
+        logique: recovery?'Réduction volontaire de charge pour assimiler.':'Progression contrôlée avec spécificité trail et prévention blessure.',
+        seances
+      });
     }
+    return sems;
+  }
+
+  function fallbackPlan(){
+    const sems = buildFallbackWeeks(1, weeks);
     return {
-      resume:`Plan de secours ${weeks} semaines pour ${race}, construit avec une progression prudente et un affûtage final.`,
+      resume:`Plan expert de secours ${weeks} semaines pour ${race}, construit avec progression prudente, spécificité trail, D+ et affûtage final. Utilise "Régénérer" sur une semaine pour obtenir une version IA encore plus individualisée.`,
       phases:[{nom:'Construction',semaines:`1-${Math.max(1,weeks-2)}`,objectif:'Monter progressivement le volume et le dénivelé'},{nom:'Affûtage',semaines:`${Math.max(1,weeks-1)}-${weeks}`,objectif:'Arriver frais le jour J'}],
       semaines:sems
     };
   }
 
   try{
-    msgEl.textContent = `Génération des semaines 1–${half}…`;
-    const d1 = normalizePlanPart(await getJsonPart(mkPrompt(1, half, true), 'partie 1'), 1, half);
-    msgEl.textContent = `Génération des semaines ${half+1}–${weeks}…`;
-    const d2 = normalizePlanPart(await getJsonPart(mkPrompt(half+1, weeks, false), 'partie 2'), half+1, weeks);
+    const planData = { resume:`Plan ${weeks} semaines pour ${race}.`, phases:[], semaines:[] };
+    let usedFallback = false;
+    const chunkSize = 2;
+    for(let from=1; from<=weeks; from+=chunkSize){
+      const to = Math.min(weeks, from + chunkSize - 1);
+      msgEl.textContent = `Génération experte des semaines ${from}–${to}…`;
+      const part = normalizePlanPart(await getJsonPart(mkPrompt(from, to, from === 1), `semaines ${from}-${to}`), from, to);
+      if(part?.semaines?.length){
+        if(from === 1){
+          planData.resume = part.resume || planData.resume;
+          planData.phases = part.phases || planData.phases;
+        }
+        planData.semaines.push(...part.semaines);
+      } else {
+        usedFallback = true;
+        planData.semaines.push(...buildFallbackWeeks(from, to));
+      }
+    }
     msgEl.textContent = 'Assemblage du plan…';
 
-    if(!d1 || !d1.semaines?.length) throw new Error('Plan IA invalide — plan de secours créé');
+    if(!planData.semaines.length) throw new Error('Plan IA invalide — plan de secours créé');
 
-    const planData = {
-      resume:   d1.resume  || `Plan ${weeks} semaines pour ${race}.`,
-      phases:   d1.phases  || [],
-      semaines: [...d1.semaines, ...(d2?.semaines || [])]
-    };
-
-    DB.plans.push({ id:Date.now(), name, race, date, dist, elev, level, dpw, goal, data:planData, createdAt:new Date().toISOString() });
+    DB.plans.push({ id:Date.now(), name, race, date, dist, elev, level, dpw, goal, data:planData, createdAt:new Date().toISOString(), partialFallback:usedFallback });
     save('plans');
     renderAll();
     closeModal('modal-plan');
@@ -1120,7 +1152,8 @@ function viewPlan(id){
     openModal('modal-pv'); return;
   }
 
-  let html = `<div style="font-size:13px;color:var(--text2);line-height:1.7;padding:13px 15px;background:var(--gb);border:1px solid var(--gbr);border-radius:var(--r);margin-bottom:14px">${d.resume||''}</div>`;
+  let html = `${p.fallback || p.partialFallback ? `<div style="font-size:12px;color:var(--amber);line-height:1.6;padding:10px 12px;background:var(--ab);border:1px solid rgba(245,200,66,.22);border-radius:var(--r);margin-bottom:10px">Certaines semaines ont été construites en secours expert car l'IA a renvoyé un JSON incomplet. Utilise "Régénérer" sur une semaine pour demander une version IA complète.</div>` : ''}
+  <div style="font-size:13px;color:var(--text2);line-height:1.7;padding:13px 15px;background:var(--gb);border:1px solid var(--gbr);border-radius:var(--r);margin-bottom:14px">${d.resume||''}</div>`;
 
   if(d.phases?.length){
     html += `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">`;
@@ -1328,6 +1361,7 @@ function renderPlans(){
             <span>🏔️ ${p.race}</span><span>📍 ${p.dist||'?'}km</span><span>⬆ ${p.elev||'?'}m+</span>
             <span>📅 ${p.date}</span>
             <span style="color:${days>0?'var(--g)':'var(--text3)'}">${days>0?'Dans '+days+' j':'Passée'}</span>
+            ${p.fallback || p.partialFallback ? `<span style="color:var(--amber)">Secours partiel</span>` : `<span style="color:var(--g)">IA expert</span>`}
           </div>
           ${nSem ? `<div style="display:flex;gap:10px;margin-top:6px;font-size:11px;color:var(--text2)"><span>📋 ${nSem} semaines</span><span>🏃 ${totKm}km total</span><span>💪 ${p.dpw||'?'} séances/sem</span></div>` : ''}
         </div>
