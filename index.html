@@ -632,6 +632,9 @@ function migrateLegacyData(){
   if(oldAthlete && !localStorage.getItem('tm_dimitri_strava_athlete')) localStorage.setItem('tm_dimitri_strava_athlete', oldAthlete);
   localStorage.setItem('tm_migrated_profiles','1');
 }
+function clearLegacyStravaConfig(){
+  ['tm_strava_id','tm_strava_secret','tm_strava_token','tm_strava_refresh','tm_strava_athlete'].forEach(k => localStorage.removeItem(k));
+}
 function loadProfile(){
   DB = {
     plans: readJson('plans', []),
@@ -659,6 +662,7 @@ function switchProfile(id){
 // ═══════════════════════════════════════════
 window.onload = async () => {
   migrateLegacyData();
+  clearLegacyStravaConfig();
   loadProfile();
   await loadServerConfig();
   await loadCloudData();
@@ -693,7 +697,7 @@ function saveKey(){
 function registerPwa(){
   if(!('serviceWorker' in navigator)) return;
   if(location.protocol !== 'https:' && location.hostname !== '127.0.0.1' && location.hostname !== 'localhost') return;
-  navigator.serviceWorker.register('/service-worker.js').catch(() => {});
+  navigator.serviceWorker.register('/service-worker.js').then(reg => reg.update()).catch(() => {});
 }
 
 async function loadServerConfig(){
