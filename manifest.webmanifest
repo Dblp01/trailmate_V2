@@ -1,0 +1,32 @@
+{
+  "name": "TrailMate",
+  "short_name": "TrailMate",
+  "description": "Coach trail IA avec plans, Strava et profils separes.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d0f0e",
+  "theme_color": "#0d0f0e",
+  "categories": ["health", "fitness", "sports"],
+  "icons": [
+    {
+      "src": "/icons/trailmate.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Coach IA",
+      "url": "/#coach",
+      "description": "Ouvrir le coach TrailMate"
+    },
+    {
+      "name": "Strava",
+      "url": "/#strava",
+      "description": "Synchroniser Strava"
+    }
+  ]
+}
