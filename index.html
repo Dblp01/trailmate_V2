@@ -1581,11 +1581,10 @@ function chatKey(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sen
 // ═══════════════════════════════════════════
 function getStravaConfig(){
   const profileId = localStorage.getItem(storageKey('strava_id')) || '';
-  const globalId = localStorage.getItem('tm_strava_id') || '';
   return {
-    clientId:     profileId || globalId || serverConfig.stravaClientId || '',
-    clientSecret: localStorage.getItem(storageKey('strava_secret')) || localStorage.getItem('tm_strava_secret') || '',
-    source:       profileId ? 'profil' : globalId ? 'navigateur' : serverConfig.stravaClientId ? 'Netlify' : 'aucune'
+    clientId:     profileId || serverConfig.stravaClientId || '',
+    clientSecret: localStorage.getItem(storageKey('strava_secret')) || '',
+    source:       profileId ? 'profil' : serverConfig.stravaClientId ? 'Netlify' : 'aucune'
   };
 }
 
@@ -1601,6 +1600,7 @@ function saveStravaConfig(){
 
 function clearProfileStravaConfig(){
   ['strava_id','strava_secret','strava_token','strava_refresh','strava_athlete'].forEach(k => localStorage.removeItem(storageKey(k)));
+  ['tm_strava_id','tm_strava_secret','tm_strava_token','tm_strava_refresh','tm_strava_athlete'].forEach(k => localStorage.removeItem(k));
   stravaToken = '';
   stravaAthlete = null;
   fillStravaConfigModal();
