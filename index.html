@@ -937,6 +937,8 @@ async function generatePlan(){
   const levelFactor = { 'Débutant': .42, 'Intermédiaire': .55, 'Avancé': .68, 'Expert': .78 }[level] || .58;
   const startLongCapMin = { 'Débutant': 75, 'Intermédiaire': 90, 'Avancé': 105, 'Expert': 120 }[level] || 90;
   const peakLongCapMin = { 'Débutant': 120, 'Intermédiaire': 150, 'Avancé': 190, 'Expert': 230 }[level] || 150;
+  const flatSpeedKmh = { 'Débutant': 6.4, 'Intermédiaire': 7.1, 'Avancé': 7.8, 'Expert': 8.4 }[level] || 7.1;
+  const elevPenaltyMinPer100m = { 'Débutant': 8.5, 'Intermédiaire': 8, 'Avancé': 7.5, 'Expert': 7 }[level] || 8;
 
   function parseDurationMinutes(value){
     const txt = String(value||'').toLowerCase().replace(',', '.');
@@ -959,9 +961,14 @@ async function generatePlan(){
     const elevM = Number(s.denivele_m)||0;
     const t = String(s.type||'').toLowerCase();
     if(t.includes('renforcement') || t.includes('mobilité') || t.includes('gainage')) return 40;
-    const moving = (km / 8.3) * 60 + (elevM / 750) * 60;
+    const moving = (km / flatSpeedKmh) * 60 + (elevM / 100) * elevPenaltyMinPer100m;
     if(t.includes('côte') || t.includes('fraction') || t.includes('tempo')) return moving + 12;
     return moving;
+  }
+
+  function maxKmForDuration(minutes, elevPerKm){
+    const minPerKm = (60 / flatSpeedKmh) + ((Math.max(0, elevPerKm) / 100) * elevPenaltyMinPer100m);
+    return Math.max(3, minutes / Math.max(7, minPerKm));
   }
 
   function durationCapFor(s, target){
@@ -977,7 +984,7 @@ async function generatePlan(){
     const cap = durationCapFor(s, target);
     const aiMin = parseDurationMinutes(s.duree);
     const estimated = estimateDurationMinutes(s);
-    const raw = aiMin || estimated;
+    const raw = Math.max(aiMin || 0, estimated);
     return formatDuration(clamp(raw, 30, cap));
   }
 
@@ -1013,11 +1020,13 @@ async function generatePlan(){
     const weekElev = Math.round(weekKm * elevRatio * (taper ? .55 : recovery ? .72 : 1));
     const longShare = raceKm >= 70 ? .42 : raceKm >= 45 ? .39 : .35;
     const maxLongByRecent = recentLongKm ? recentLongKm * (1 + Math.min(.45, weekNumber * .08)) : weekKm * .42;
-    const minLong = Math.min(9, weekKm*.38);
-    const maxLong = Math.max(minLong, Math.min(maxLongByRecent, raceKm * .48, weekKm * .46));
-    const longKm = clamp(weekKm * longShare, minLong, maxLong);
-    const longElev = Math.round(weekElev * (raceKm >= 45 ? .48 : .42));
     const longMinutes = Math.round(clamp(startLongCapMin + (peakLongCapMin - startLongCapMin) * progress, startLongCapMin, peakLongCapMin));
+    const longElevPerKm = Math.max(15, Math.min(90, elevRatio));
+    const maxLongByTime = maxKmForDuration(longMinutes * .95, longElevPerKm);
+    const minLong = Math.min(9, weekKm*.34, maxLongByTime * .9);
+    const maxLong = Math.max(minLong, Math.min(maxLongByRecent, raceKm * .42, weekKm * .44, maxLongByTime));
+    const longKm = clamp(weekKm * longShare, minLong, maxLong);
+    const longElev = Math.round(Math.min(weekElev * (raceKm >= 45 ? .48 : .42), longKm * longElevPerKm * 1.08));
     return {
       weekKm: Math.round(weekKm),
       weekElev,
@@ -1079,6 +1088,7 @@ Répartition conseillée des séances, à personnaliser sans perdre la logique: 
 Règles de cohérence obligatoires:
 - Allure trail réaliste: sortie facile 7-10 km/h selon dénivelé, sortie longue montagne 5-8 km/h selon dénivelé.
 - Ne propose jamais 2h30 pour 11km sauf si dénivelé très élevé (>1000m+) ou terrain technique; sinon ajuste distance ou durée.
+- Ne propose jamais une allure de champion: vérifie toujours durée = distance + D+. Exemple interdit: 28km/1800m+ en moins de 4h pour un coureur non élite.
 - Pour une course ${dist||'?'}km/${elev||'?'}m+, augmente progressivement les sorties longues vers 35-55% de la distance cible selon le niveau.
 - La charge part du niveau actuel, pas du rêve final. Aucune séance hors sortie longue ne doit dépasser 1h35. La sortie longue ne doit pas dépasser ${target.longMinutes} minutes cette semaine.
 - Si la charge récente est inconnue ou faible, sois conservateur: séances faciles 35-70min, qualité courte, sortie longue progressive.
