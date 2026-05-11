@@ -604,7 +604,7 @@ let DB = { plans:[], sessions:[], races:[], briefs:[] };
 let chatHistory = [];
 let stravaToken = '';
 let stravaAthlete = null;
-let serverConfig = { hasAnthropic:false, stravaClientId:'' };
+let serverConfig = { hasOpenAI:false, hasAnthropic:false, aiProvider:'', stravaClientId:'' };
 let cloudData = null;
 let cloudTimer = null;
 let cloudStatus = 'local';
@@ -828,14 +828,14 @@ function fillStravaConfigModal(){
 }
 
 // ═══════════════════════════════════════════
-// CLAUDE API
+// IA API
 // ═══════════════════════════════════════════
 async function claude(messages, sys, maxTok){
   const res = await fetch('/.netlify/functions/claude', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-5',
+      model: 'gpt-5',
       max_tokens: maxTok || 1500,
       system: sys || getSys(),
       messages
@@ -1139,35 +1139,40 @@ async function generatePlan(){
   }
 
   const SYS = `Tu es un coach expert mondial en trail running, ultra-trail, préparation montagne, physiologie de l'endurance, nutrition sportive, préparation physique moderne et performance outdoor.
-Tu raisonnes comme un entraîneur UTMB élite: individualisation, progressivité, prévention blessure, polarisation, spécificité terrain, gestion du D+, économie de course, puissance en montée, technique de descente, endurance musculaire, récupération, charge aiguë/chronique et adaptation au ressenti.
-Tu ne crées jamais un planning générique. Chaque séance doit avoir une intention physiologique claire et une logique dans la progression.
+Tu raisonnes comme un coach humain pragmatique: plans simples, réalistes, construits en durées, D+ approximatif, contenu concret, nutrition et récupération.
+Tu ne dois PAS faire un tableau de kilomètres. En trail, la distance est secondaire. Tu privilégies durée, dénivelé, objectif de séance, structure et adaptation.
+Tu dois produire des plans comme un bon coach écrirait à son athlète: semaine par semaine, séance par séance, sans chiffres absurdes, sans allure de champion.
 Tu génères uniquement du JSON strict pour une application. Aucun markdown, aucun backtick, aucun texte hors JSON.`;
 
   function mkPrompt(from, to, withMeta){
     const target = weekTargets(from);
     const meta = withMeta ? `"resume":"stratégie globale en 2 phrases","phases":[{"nom":"Phase - Nom","semaines":"X-Y","objectif":"..."}],` : '';
-    return `MISSION: crée une semaine de plan trail ultra-personnalisée, intelligente et évolutive pour ${profile.name}, comme le ferait un coach élite spécialisé trail/ultra.
+    return `MISSION: crée une semaine de plan trail personnalisée, simple, réaliste et exploitable pour ${profile.name}.
 Course cible: ${race}, ${dist||'?'}km, ${elev||'?'}m+, date ${date}.
 Niveau: ${level}. Fréquence: exactement ${dpw} séances par semaine. Objectif: ${goal||'finisher'}.
 Données récentes: moyenne approximative ${avgKm4}km sur les dernières séances enregistrées; volume hebdo estimé ${recentWeeklyKm ? Math.round(recentWeeklyKm) + 'km' : 'inconnu'}; plus longue sortie récente ${recentLongKm ? recentLongKm + 'km' : 'inconnue'}; dernières séances: ${recent.map(s=>`${s.date} ${s.type} ${s.km||'?'}km ${s.elev||0}m+`).join(' | ') || 'aucune'}.
-Analyse obligatoirement: objectif, date, distance, D+, niveau, volume actuel, séances récentes, fatigue potentielle, disponibilité, progressivité, spécificité trail, prévention blessure.
-Philosophie à appliquer: développement aérobie prioritaire, polarisation, seuil/VO2max dosés, endurance musculaire, travail excentrique quadriceps, montée, descente, stabilité, nutrition/hydratation, gestion énergétique et affûtage.
-Contraintes: progression prudente, semaine allégée toutes les 4 semaines si possible, affûtage sur les 2 dernières semaines, aucune séance absurde pour le niveau, volume cohérent avec la distance et le dénivelé. Évite deux grosses intensités consécutives. Adapte si fatigue probable.
+Analyse obligatoirement: niveau réel, charge actuelle, objectif, date, D+, fatigue potentielle, progression, prévention blessure.
+Philosophie: 3 blocs simples: qualité/côtes, endurance vallonnée, sortie longue trail; renforcement court si le nombre de séances le permet. Semaine allégée toutes les 3-4 semaines, affûtage final.
+Contraintes: progressivité prudente, pas de volume absurde, pas de séances pour impressionner. Évite deux intensités consécutives.
 Repères internes optionnels pour la semaine ${from}: phase "${target.phase}", focus "${target.focus}". Ne force pas les kilomètres si la durée est plus pertinente.
 Structure conseillée à personnaliser: 1 séance qualité/côtes, 1 endurance vallonnée, 1 sortie longue trail, renforcement court si demandé dans les infos ou possible sans ajouter une 4e sortie.
 Règles de cohérence obligatoires:
 - Construis le plan comme un coach humain: priorité aux durées, D+ approximatif, contenu de séance, nutrition, fatigue, progression.
 - N'affiche une distance que si elle aide vraiment. Pour les sorties longues trail, durée + D+ suffisent souvent.
 - Allure trail réaliste: sortie facile 6-10 km/h selon dénivelé, sortie longue montagne/rando-course 4-7 km/h selon dénivelé.
-- Ne propose jamais 2h30 pour 11km sauf si dénivelé très élevé (>1000m+) ou terrain technique; sinon ajuste distance ou durée.
 - Ne propose jamais une allure de champion: vérifie toujours durée = distance + D+. Exemple interdit: 28km/1800m+ en moins de 4h pour un coureur non élite.
-- Pour une course ${dist||'?'}km/${elev||'?'}m+, augmente progressivement les sorties longues vers 35-55% de la distance cible selon le niveau.
 - La charge part du niveau actuel, pas du rêve final. Aucune séance hors sortie longue ne doit dépasser 2h sauf cas très justifié. Les sorties longues progressent par durée.
-- Si la charge récente est inconnue ou faible, sois conservateur: séances faciles 35-70min, qualité courte, sortie longue progressive.
+- Pour un objectif ultra/trail long, les sorties longues doivent ressembler à: 2h15, 2h45, 3h15, semaine allégée 2h, puis 3h30/4h selon niveau. Pas de distance obligatoire.
+- Si la charge récente est inconnue ou faible, sois conservateur: séances faciles 45-80min, qualité courte, sortie longue progressive.
 - Ne remplis pas des km pour faire joli. Si distance incertaine, mets distance_km:0.
 - Le champ description doit expliquer quoi faire concrètement, pas une phrase générique.
 - Le champ conseil doit dire comment juger si la séance est réussie et quoi surveiller.
 - Inclure renforcement/PPG/mobilité/rando-course si pertinent dans les séances hebdomadaires, sans dépasser exactement ${dpw} séances.
+Style attendu:
+- Séance qualité: "1h10 total: 20min EF + 8x2min montée soutenue récup descente + 15min retour calme"
+- Endurance vallonnée: "1h15 trail facile vallonné + 6x20s rapides en côte"
+- Sortie longue: "2h30 trail, 800-1200D+, tester nutrition, rester facile"
+- Renfo: "30min squats, fentes, gainage, mollets, équilibre"
 Génère uniquement la semaine ${from} sur un total de ${weeks} semaines. JSON EXACT:
 {${meta}"semaines":[{"numero":${from},"phase":"Base","volume_km":0,"denivele_m":600,"charge":"modérée","focus":"Endurance","objectif":"objectif de la semaine","logique":"pourquoi cette semaine est construite ainsi","seances":[{"jour":"Mar","type":"Côtes","objectif":"puissance montée et cardio","duree":"1h10","distance_km":0,"denivele_m":300,"intensite":"soutenu contrôlé","zone":"Z3-Z4","allure":"effort, pas allure route","rpe":"7/10","recuperation":"24-36h facile ensuite","description":"20min EF + 8x2min montée soutenue récup descente + 15min retour calme","echauffement":"20min EF + mobilité chevilles/hanches","corps":"8x2min montée soutenue, récupération en descente","retour_calme":"15min facile","technique":"posture haute, petits pas, mains actives","nutrition":"eau; glucides si chaleur","conseil":"réussie si la dernière répétition reste propre"}]}]}
 Types possibles: Endurance fondamentale|Sortie longue|Back to back|Seuil|Tempo|VO2max|Fractionné court|Fractionné long|Côtes courtes|Côtes longues|Descente technique|Randonnée active|Rando-course|Travail bâtons|Technique trail|Sortie spécifique D+|Travail fatigue|Séance ultra spécifique|Renforcement musculaire|PPG/PPS|Mobilité|Gainage|Force endurance|Plyométrie|Vélo|Récupération.
@@ -1827,7 +1832,7 @@ async function sendChat(){
     const res = await fetch('/.netlify/functions/claude', {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({ model:'claude-sonnet-4-5', max_tokens:1500, system:getSys(), messages:chatHistory })
+      body: JSON.stringify({ model:'gpt-5', max_tokens:1500, system:getSys(), messages:chatHistory })
     });
     const d = await res.json();
     if(!res.ok) throw new Error(d.error?.message || d.error || 'Erreur API '+res.status);
