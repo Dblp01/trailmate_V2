@@ -926,28 +926,93 @@ async function generatePlan(){
   const profile = PROFILES[activeProfile];
   const recent = [...DB.sessions].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,10);
   const avgKm4 = recent.length ? (recent.reduce((a,s)=>a+(Number(s.km)||0),0) / Math.min(4,recent.length)).toFixed(1) : 'inconnu';
+  const raceKm = Math.max(10, Number(dist)||45);
+  const raceElev = Math.max(0, Number(elev)||Math.round(raceKm * 35));
+  const sessionsPerWeek = Math.max(2, Number(dpw)||4);
+  const recentWeeklyKm = recent.length ? recent.reduce((a,s)=>a+(Number(s.km)||0),0) / Math.max(1, Math.min(2.5, recent.length / sessionsPerWeek)) : 0;
+  const elevRatio = raceElev / Math.max(1, raceKm);
+  const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+  const levelFactor = { 'Débutant': .42, 'Intermédiaire': .55, 'Avancé': .68, 'Expert': .78 }[level] || .58;
+
+  function weekTargets(weekNumber){
+    const progress = weekNumber / Math.max(1, weeks);
+    const taper = weekNumber > weeks - 2;
+    const recovery = weekNumber % 4 === 0 && !taper;
+    const startKm = clamp(recentWeeklyKm || raceKm * .32, 18, Math.max(24, raceKm * .62));
+    const peakKm = clamp(raceKm * levelFactor, startKm + 6, Math.max(startKm + 10, Math.min(105, raceKm * .95)));
+    let weekKm = startKm + (peakKm - startKm) * Math.min(.92, progress * 1.12);
+    if(recovery) weekKm *= .76;
+    if(taper) weekKm *= weekNumber === weeks ? .46 : .66;
+    const weekElev = Math.round(weekKm * elevRatio * (taper ? .55 : recovery ? .72 : 1));
+    const longShare = raceKm >= 70 ? .42 : raceKm >= 45 ? .39 : .35;
+    const longKm = clamp(weekKm * longShare, Math.min(12, weekKm*.45), Math.min(raceKm * .55, weekKm * .48));
+    const longElev = Math.round(weekElev * (raceKm >= 45 ? .48 : .42));
+    return {
+      weekKm: Math.round(weekKm),
+      weekElev,
+      longKm: Math.round(longKm),
+      longElev,
+      phase: taper ? 'Affûtage' : recovery ? 'Récupération' : progress < .34 ? 'Base' : progress < .72 ? 'Développement' : 'Spécifique trail',
+      charge: taper ? 'réduite' : recovery ? 'allégée' : 'progressive',
+      focus: taper ? 'Fraîcheur et maintien des sensations' : recovery ? 'Assimilation et prévention blessure' : progress < .34 ? 'Base aérobie + technique' : progress < .72 ? 'Endurance musculaire + D+' : 'Spécificité course'
+    };
+  }
+
+  function sessionBlueprints(weekNumber, target){
+    const days = ['Mar','Jeu','Sam','Dim','Mer','Ven'];
+    const recovery = target.phase === 'Récupération';
+    const taper = target.phase === 'Affûtage';
+    const qualityType = weekNumber % 3 === 1 ? 'Côtes longues' : weekNumber % 3 === 2 ? 'Tempo trail' : 'Côtes courtes';
+    const qualityZone = qualityType.includes('Tempo') ? 'Z3' : 'Z4';
+    const plan = [
+      {jour:days[0], type:'Endurance fondamentale', share:.24, elev:.16, zone:'Z2', role:'aérobie facile, économie de course'},
+      {jour:days[1], type:recovery || taper ? 'Technique trail' : qualityType, share:recovery ? .20 : .23, elev:recovery ? .14 : .24, zone:recovery || taper ? 'Z1-Z2' : qualityZone, role:recovery || taper ? 'coordination, appuis, aisance' : 'qualité ciblée sans finir vidé'},
+      {jour:days[2], type:sessionsPerWeek >= 5 ? 'Renforcement musculaire' : 'Récupération active', share:sessionsPerWeek >= 5 ? .05 : .15, elev:.05, zone:'Z1', role:'prévention blessure et gainage actif'},
+      {jour:days[3], type:'Sortie longue trail', share:target.longKm / Math.max(1,target.weekKm), elev:target.longElev / Math.max(1,target.weekElev), zone:'Z2', role:'spécificité trail, D+, nutrition, résistance musculaire'},
+      {jour:days[4], type:weekNumber % 2 ? 'Rando-course' : 'Descente technique', share:.17, elev:.22, zone:'Z2', role:'travail trail spécifique et quadriceps'},
+      {jour:days[5], type:'Mobilité', share:.03, elev:0, zone:'Z1', role:'récupération, mobilité, stabilité'}
+    ].slice(0, sessionsPerWeek);
+    if(!plan.some(s => s.type.includes('Sortie longue'))) plan[plan.length-1] = {jour:days[Math.min(3, plan.length-1)], type:'Sortie longue trail', share:target.longKm / Math.max(1,target.weekKm), elev:target.longElev / Math.max(1,target.weekElev), zone:'Z2', role:'spécificité trail, D+, nutrition, résistance musculaire'};
+    const fixedLong = plan.find(s => s.type.includes('Sortie longue'));
+    const longKm = fixedLong ? target.longKm : 0;
+    const remaining = Math.max(1, target.weekKm - longKm);
+    const nonLong = plan.filter(s => !s.type.includes('Sortie longue') && !s.type.includes('Renforcement') && !s.type.includes('Mobilité'));
+    const shareSum = nonLong.reduce((a,s)=>a+s.share,0) || 1;
+    return plan.map(s => {
+      const strength = s.type.includes('Renforcement') || s.type.includes('Mobilité');
+      const km = s.type.includes('Sortie longue') ? target.longKm : strength ? 0 : Math.max(5, Math.round(remaining * s.share / shareSum));
+      const dplus = s.type.includes('Sortie longue') ? target.longElev : strength ? 0 : Math.max(0, Math.round(target.weekElev * s.elev));
+      return { ...s, distance_km: km, denivele_m: dplus };
+    });
+  }
+
   const SYS = `Tu es un coach expert mondial en trail running, ultra-trail, préparation montagne, physiologie de l'endurance, nutrition sportive, préparation physique moderne et performance outdoor.
 Tu raisonnes comme un entraîneur UTMB élite: individualisation, progressivité, prévention blessure, polarisation, spécificité terrain, gestion du D+, économie de course, puissance en montée, technique de descente, endurance musculaire, récupération, charge aiguë/chronique et adaptation au ressenti.
 Tu ne crées jamais un planning générique. Chaque séance doit avoir une intention physiologique claire et une logique dans la progression.
 Tu génères uniquement du JSON strict pour une application. Aucun markdown, aucun backtick, aucun texte hors JSON.`;
 
   function mkPrompt(from, to, withMeta){
+    const target = weekTargets(from);
+    const blueprints = sessionBlueprints(from, target);
     const meta = withMeta ? `"resume":"stratégie globale en 2 phrases","phases":[{"nom":"Phase - Nom","semaines":"X-Y","objectif":"..."}],` : '';
-    return `MISSION: crée un plan trail ultra-personnalisé, intelligent et évolutif pour ${profile.name}, comme le ferait un coach élite spécialisé trail/ultra.
+    return `MISSION: crée une semaine de plan trail ultra-personnalisée, intelligente et évolutive pour ${profile.name}, comme le ferait un coach élite spécialisé trail/ultra.
 Course cible: ${race}, ${dist||'?'}km, ${elev||'?'}m+, date ${date}.
 Niveau: ${level}. Fréquence: exactement ${dpw} séances par semaine. Objectif: ${goal||'finisher'}.
 Données récentes: moyenne approximative ${avgKm4}km sur les dernières séances enregistrées; dernières séances: ${recent.map(s=>`${s.date} ${s.type} ${s.km||'?'}km ${s.elev||0}m+`).join(' | ') || 'aucune'}.
 Analyse obligatoirement: objectif, date, distance, D+, niveau, volume actuel, séances récentes, fatigue potentielle, disponibilité, progressivité, spécificité trail, prévention blessure.
 Philosophie à appliquer: développement aérobie prioritaire, polarisation, seuil/VO2max dosés, endurance musculaire, travail excentrique quadriceps, montée, descente, stabilité, nutrition/hydratation, gestion énergétique et affûtage.
 Contraintes: progression prudente, semaine allégée toutes les 4 semaines si possible, affûtage sur les 2 dernières semaines, aucune séance absurde pour le niveau, volume cohérent avec la distance et le dénivelé. Évite deux grosses intensités consécutives. Adapte si fatigue probable.
+CIBLES CHIFFRÉES À RESPECTER POUR LA SEMAINE ${from}: volume total environ ${target.weekKm}km, dénivelé environ ${target.weekElev}m+, sortie longue environ ${target.longKm}km/${target.longElev}m+, phase "${target.phase}", focus "${target.focus}".
+Répartition conseillée des séances, à personnaliser sans perdre la logique: ${JSON.stringify(blueprints)}.
 Règles de cohérence obligatoires:
 - Allure trail réaliste: sortie facile 7-10 km/h selon dénivelé, sortie longue montagne 5-8 km/h selon dénivelé.
 - Ne propose jamais 2h30 pour 11km sauf si dénivelé très élevé (>1000m+) ou terrain technique; sinon ajuste distance ou durée.
 - Pour une course ${dist||'?'}km/${elev||'?'}m+, augmente progressivement les sorties longues vers 35-55% de la distance cible selon le niveau.
+- Interdiction de mettre la même distance à toutes les séances. Chaque séance doit avoir un rôle différent et une distance cohérente avec ce rôle.
 - Le champ description doit expliquer quoi faire concrètement, pas une phrase générique.
 - Le champ conseil doit dire comment juger si la séance est réussie et quoi surveiller.
 - Inclure renforcement/PPG/mobilité/rando-course si pertinent dans les séances hebdomadaires, sans dépasser exactement ${dpw} séances.
-Génère uniquement les semaines ${from} à ${to} sur un total de ${weeks} semaines. JSON EXACT:
+Génère uniquement la semaine ${from} sur un total de ${weeks} semaines. JSON EXACT:
 {${meta}"semaines":[{"numero":${from},"phase":"Base","volume_km":40,"denivele_m":600,"charge":"modérée","focus":"Endurance","objectif":"objectif de la semaine","logique":"pourquoi cette semaine est construite ainsi","seances":[{"jour":"Mar","type":"Endurance fondamentale","objectif":"développement aérobie et économie de course","duree":"50min","distance_km":10,"denivele_m":100,"intensite":"facile","zone":"Z2","allure":"aisance respiratoire","rpe":"3/10","recuperation":"24h avant séance intense","description":"déroulé concret de la séance","echauffement":"10min facile + mobilité chevilles","corps":"35min Z2 stable","retour_calme":"5min très facile","technique":"foulée relâchée, cadence stable","nutrition":"eau uniquement sauf chaleur","conseil":"critère de réussite + vigilance"}]}]}
 Types possibles: Endurance fondamentale|Sortie longue|Back to back|Seuil|Tempo|VO2max|Fractionné court|Fractionné long|Côtes courtes|Côtes longues|Descente technique|Randonnée active|Rando-course|Travail bâtons|Technique trail|Sortie spécifique D+|Travail fatigue|Séance ultra spécifique|Renforcement musculaire|PPG/PPS|Mobilité|Gainage|Force endurance|Plyométrie|Vélo|Récupération.
 Chaque semaine doit contenir exactement ${dpw} séances. Chaque séance doit avoir au minimum jour,type,objectif,duree,distance_km,denivele_m,intensite,zone,allure,rpe,recuperation,description,echauffement,corps,retour_calme,technique,nutrition,conseil.`;
@@ -1031,56 +1096,68 @@ Chaque semaine doit contenir exactement ${dpw} séances. Chaque séance doit avo
   }
 
   function buildFallbackWeeks(from, to){
-    const types = ['Endurance fondamentale','Côtes','Tempo','Sortie longue','Récupération','Fractionné'];
-    const baseKm = Math.max(18, Number(dist||40) * 0.35);
     const sems = [];
     for(let i=from;i<=to;i++){
-      const progress = i / Math.max(1,weeks);
-      const taper = i > weeks-2;
-      const recovery = i % 4 === 0 && !taper;
-      const volume = taper ? baseKm * .65 : recovery ? baseKm * .78 : baseKm * (1.0 + progress * 0.85);
-      const elevWeek = Math.round(volume * Math.max(20, Number(elev||1200) / Math.max(1, Number(dist||40))) * (taper ? .55 : 1));
-      const seances = [];
-      const days = ['Mar','Jeu','Sam','Dim','Mer','Ven'];
-      for(let j=0;j<Number(dpw);j++){
-        const isLong = j === Math.min(3, Number(dpw)-1);
-        const type = isLong ? 'Sortie longue' : types[(i+j)%types.length];
-        const kmS = Math.max(isLong ? 14 : 7, Math.round(volume * (isLong ? .42 : .58/(Number(dpw)-1 || 1))));
-        const elevS = Math.round(elevWeek * (isLong ? .48 : .52/(Number(dpw)-1 || 1)));
-        seances.push({
-          jour: days[j],
+      const target = weekTargets(i);
+      const blueprints = sessionBlueprints(i, target);
+      const seances = blueprints.map((bp) => {
+        const type = bp.type;
+        const kmS = bp.distance_km;
+        const elevS = bp.denivele_m;
+        const isLong = type.includes('Sortie longue');
+        const isStrength = type.includes('Renforcement') || type.includes('Mobilité');
+        const isQuality = type.includes('Côtes') || type.includes('Tempo') || type.includes('Fractionné');
+        return {
+          jour: bp.jour,
           type,
-          objectif: isLong ? 'Endurance spécifique trail, résistance musculaire et stratégie nutritionnelle' : `${type}: développer une qualité ciblée sans créer de surcharge inutile`,
+          objectif: isLong ? 'Endurance spécifique trail, résistance musculaire, D+ et stratégie nutritionnelle' : isStrength ? 'Prévention blessure, stabilité bassin-cheville et force utile en montagne' : `${type}: ${bp.role}`,
           duree: inferDuration({type, distance_km:kmS, denivele_m:elevS}),
           distance_km: kmS,
           denivele_m: elevS,
-          intensite: type === 'Fractionné' || type === 'Tempo' ? 'Soutenu contrôlé' : 'Facile à modéré',
-          zone: type === 'Fractionné' || type === 'Tempo' ? 'Z3-Z4' : 'Z2',
+          intensite: isQuality ? 'Soutenu contrôlé, jamais maximal' : isStrength ? 'Contrôlé' : 'Facile à modéré',
+          zone: bp.zone,
           allure: isLong ? 'Rando-course en aisance, montées gérées, relances souples' : 'Selon zone, jamais à bloc',
-          rpe: type === 'Fractionné' || type === 'Tempo' ? '6-8/10' : isLong ? '4-6/10' : '3-5/10',
-          recuperation: recovery ? '48h si fatigue élevée' : '24h minimum avant intensité',
-          description: isLong ? `Sortie longue trail: ${kmS}km avec ${elevS}m+, départ facile, montées en gestion, descentes propres, tester hydratation/nutrition.` : `${type}: séance structurée avec échauffement progressif, bloc principal maîtrisé, retour au calme. Rester propre techniquement.`,
-          echauffement: type === 'Récupération' ? '10min très facile' : '15-20min facile + mobilité hanches/chevilles + 3 accélérations progressives si intensité',
-          corps: isLong ? `${kmS}km trail en endurance, marcher les fortes pentes si nécessaire, travailler économie et régularité.` : type === 'Côtes' ? 'Répétitions en montée avec posture haute, poussée complète, récupération en descente souple.' : type === 'Tempo' ? 'Bloc tempo contrôlé, respiratoire soutenu mais stable, sans finir vidé.' : `${type} en respectant la zone prévue.`,
+          rpe: isQuality ? '6-8/10' : isLong ? '4-6/10' : isStrength ? '3-5/10' : '3-4/10',
+          recuperation: target.phase === 'Récupération' ? '48h si fatigue élevée' : isQuality ? '24-36h sans intensité ensuite' : '24h selon sensations',
+          description: isLong ? `Sortie longue trail: ${kmS}km avec ${elevS}m+, départ très facile, montées en gestion, descentes propres, tester hydratation et alimentation.` : isStrength ? 'Circuit fonctionnel: gainage, fentes, step-up, mollets, ischios, proprioception cheville, sans chercher la fatigue maximale.' : `${type}: séance ciblée avec échauffement progressif, bloc principal maîtrisé, retour au calme. La qualité prime sur la vitesse.`,
+          echauffement: isStrength ? '8-10min mobilité hanches/chevilles + activation fessiers/mollets' : '15-20min facile + mobilité hanches/chevilles + 3 accélérations progressives si intensité',
+          corps: isLong ? `${kmS}km trail en endurance, marcher les pentes raides si nécessaire, rester régulier, finir avec encore de la marge.` : type.includes('Côtes longues') ? '5-8 répétitions de 3-5min en montée Z3-Z4, récupération en descente facile, posture haute.' : type.includes('Côtes courtes') ? '8-12 répétitions de 45-75s en côte dynamique, récupération complète, puissance propre.' : type.includes('Tempo') ? '2-3 blocs de 8-12min tempo trail Z3, récupération 3min facile, sans dérive excessive.' : isStrength ? '3 tours: 8-10 step-up/jambe, 10 fentes arrière/jambe, 30-45s gainage, 12 mollets, 8 dead bug/jambe, proprioception 45s/jambe.' : `${type} en respectant la zone prévue et la fraîcheur du jour.`,
           retour_calme: '8-12min très facile + mobilité légère',
           technique: isLong ? 'Regard loin, appuis courts en descente, cadence régulière en montée.' : 'Foulée relâchée, gainage actif, appuis silencieux.',
           nutrition: isLong ? 'Tester 40-70g glucides/h + 500-750ml/h selon chaleur.' : 'Hydratation simple; glucides seulement si séance >75min ou intensité forte.',
-          conseil: recovery ? 'Semaine allégée: tu dois finir plus frais que fatigué.' : 'Séance réussie si tu respectes la zone et gardes une foulée propre jusqu’à la fin.'
-        });
-      }
+          conseil: target.phase === 'Récupération' ? 'Semaine allégée: tu dois finir plus frais que fatigué.' : isQuality ? 'Réussite = dernière répétition propre, pas forcément plus rapide. Stop si la foulée se dégrade.' : 'Séance réussie si tu respectes la zone et gardes une foulée propre jusqu’à la fin.'
+        };
+      });
       sems.push({
         numero:i,
-        phase:taper?'Affûtage':recovery?'Récupération':'Développement',
-        volume_km:Math.round(volume),
-        denivele_m:elevWeek,
-        charge: recovery?'allégée':taper?'réduite':'progressive',
-        focus:taper?'Fraîcheur':'Progression trail',
-        objectif: taper?'Assimiler la préparation et arriver frais':'Construire endurance, D+ et résistance musculaire sans surcharge brutale',
-        logique: recovery?'Réduction volontaire de charge pour assimiler.':'Progression contrôlée avec spécificité trail et prévention blessure.',
+        phase:target.phase,
+        volume_km:target.weekKm,
+        denivele_m:target.weekElev,
+        charge:target.charge,
+        focus:target.focus,
+        objectif: target.phase === 'Affûtage' ? 'Assimiler la préparation et arriver frais' : target.phase === 'Récupération' ? 'Absorber la charge et repartir solide' : 'Construire endurance, D+, force utile et économie de course sans surcharge brutale',
+        logique: target.phase === 'Récupération' ? 'Réduction volontaire de charge pour assimiler et limiter le risque de blessure.' : 'Progression contrôlée avec une séance qualité, une base aérobie, du travail musculaire et une sortie longue spécifique trail.',
         seances
       });
     }
     return sems;
+  }
+
+  function isWeakWeek(w){
+    const seances = w?.seances || [];
+    if(seances.length < sessionsPerWeek) return true;
+    const runs = seances.filter(s => Number(s.distance_km) > 0);
+    const kms = runs.map(s => Math.round(Number(s.distance_km)||0));
+    const uniqueKm = new Set(kms).size;
+    const genericText = seances.filter(s => /Séance contrôlée|Priorise la régularité|retour au calme\.$/i.test(`${s.description||''} ${s.conseil||''}`)).length;
+    const missingDetail = seances.filter(s => !s.objectif || !s.corps || !s.echauffement || !s.conseil || String(s.description||'').length < 35).length;
+    const longRun = Math.max(0, ...kms);
+    if(runs.length >= 3 && uniqueKm <= 2) return true;
+    if(raceKm >= 35 && runs.length >= 3 && kms.filter(k => k <= 7).length >= runs.length - 1) return true;
+    if(raceKm >= 45 && longRun < Math.min(12, raceKm * .22)) return true;
+    if(genericText >= Math.ceil(seances.length / 2)) return true;
+    if(missingDetail >= Math.ceil(seances.length / 2)) return true;
+    return false;
   }
 
   function fallbackPlan(){
@@ -1095,17 +1172,24 @@ Chaque semaine doit contenir exactement ${dpw} séances. Chaque séance doit avo
   try{
     const planData = { resume:`Plan ${weeks} semaines pour ${race}.`, phases:[], semaines:[] };
     let usedFallback = false;
-    const chunkSize = 2;
+    const chunkSize = 1;
     for(let from=1; from<=weeks; from+=chunkSize){
       const to = Math.min(weeks, from + chunkSize - 1);
-      msgEl.textContent = `Génération experte des semaines ${from}–${to}…`;
+      msgEl.textContent = `Génération experte de la semaine ${from}/${weeks}…`;
       const part = normalizePlanPart(await getJsonPart(mkPrompt(from, to, from === 1), `semaines ${from}-${to}`), from, to);
       if(part?.semaines?.length){
         if(from === 1){
           planData.resume = part.resume || planData.resume;
           planData.phases = part.phases || planData.phases;
         }
-        planData.semaines.push(...part.semaines);
+        part.semaines.forEach(w => {
+          if(isWeakWeek(w)){
+            usedFallback = true;
+            planData.semaines.push(buildFallbackWeeks(w.numero, w.numero)[0]);
+          } else {
+            planData.semaines.push(w);
+          }
+        });
       } else {
         usedFallback = true;
         planData.semaines.push(...buildFallbackWeeks(from, to));
