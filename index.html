@@ -1067,6 +1067,50 @@ async function generatePlan(){
     });
   }
 
+  function coachSessionFromBlueprint(bp, source, target){
+    const type = bp.type;
+    const isLong = type.includes('Sortie longue');
+    const isStrength = type.includes('Renforcement') || type.includes('Mobilité');
+    const isQuality = type.includes('Côtes') || type.includes('Tempo') || type.includes('Fractionné');
+    const clean = { type, distance_km: bp.distance_km, denivele_m: bp.denivele_m };
+    const fallbackDescription = isLong
+      ? `Sortie longue trail: ${bp.distance_km}km avec ${bp.denivele_m}m+, départ très facile, montées en gestion, descentes propres, tester hydratation et alimentation.`
+      : isStrength
+        ? 'Circuit fonctionnel: gainage, fentes, step-up, mollets, ischios, proprioception cheville, sans chercher la fatigue maximale.'
+        : `${type}: séance ciblée avec échauffement progressif, bloc principal maîtrisé, retour au calme. La qualité prime sur la vitesse.`;
+    const fallbackCorps = isLong
+      ? `${bp.distance_km}km trail en endurance, marcher les pentes raides si nécessaire, rester régulier, finir avec encore de la marge.`
+      : type.includes('Côtes longues')
+        ? '5-8 répétitions de 3-5min en montée Z3-Z4, récupération en descente facile, posture haute.'
+        : type.includes('Côtes courtes')
+          ? '8-12 répétitions de 45-75s en côte dynamique, récupération complète, puissance propre.'
+          : type.includes('Tempo')
+            ? '2-3 blocs de 8-12min tempo trail Z3, récupération 3min facile, sans dérive excessive.'
+            : isStrength
+              ? '3 tours: 8-10 step-up/jambe, 10 fentes arrière/jambe, 30-45s gainage, 12 mollets, 8 dead bug/jambe, proprioception 45s/jambe.'
+              : `${type} en respectant la zone prévue et la fraîcheur du jour.`;
+    return {
+      jour: bp.jour,
+      type,
+      objectif: source?.objectif || (isLong ? 'Endurance spécifique trail, résistance musculaire, D+ et stratégie nutritionnelle' : isStrength ? 'Prévention blessure, stabilité bassin-cheville et force utile en montagne' : `${type}: ${bp.role}`),
+      duree: normalizeDuration(clean, target),
+      distance_km: bp.distance_km,
+      denivele_m: bp.denivele_m,
+      intensite: isQuality ? 'Soutenu contrôlé, jamais maximal' : isStrength ? 'Contrôlé' : 'Facile à modéré',
+      zone: bp.zone,
+      allure: isLong ? 'Rando-course en aisance, montées gérées, relances souples' : 'Selon zone, jamais à bloc',
+      rpe: isQuality ? '6-8/10' : isLong ? '4-6/10' : isStrength ? '3-5/10' : '3-4/10',
+      recuperation: target.phase === 'Récupération' ? '48h si fatigue élevée' : isQuality ? '24-36h sans intensité ensuite' : '24h selon sensations',
+      description: source?.description && String(source.description).length > 45 ? source.description : fallbackDescription,
+      echauffement: source?.echauffement || (isStrength ? '8-10min mobilité hanches/chevilles + activation fessiers/mollets' : '15-20min facile + mobilité hanches/chevilles + 3 accélérations progressives si intensité'),
+      corps: source?.corps && String(source.corps).length > 30 ? source.corps : fallbackCorps,
+      retour_calme: source?.retour_calme || '8-12min très facile + mobilité légère',
+      technique: source?.technique || (isLong ? 'Regard loin, appuis courts en descente, cadence régulière en montée.' : 'Foulée relâchée, gainage actif, appuis silencieux.'),
+      nutrition: source?.nutrition || (isLong ? 'Tester 40-70g glucides/h + 500-750ml/h selon chaleur.' : 'Hydratation simple; glucides seulement si séance >75min ou intensité forte.'),
+      conseil: source?.conseil && String(source.conseil).length > 35 ? source.conseil : target.phase === 'Récupération' ? 'Semaine allégée: tu dois finir plus frais que fatigué.' : isQuality ? 'Réussite = dernière répétition propre, pas forcément plus rapide. Stop si la foulée se dégrade.' : 'Séance réussie si tu respectes la zone et gardes une foulée propre jusqu’à la fin.'
+    };
+  }
+
   const SYS = `Tu es un coach expert mondial en trail running, ultra-trail, préparation montagne, physiologie de l'endurance, nutrition sportive, préparation physique moderne et performance outdoor.
 Tu raisonnes comme un entraîneur UTMB élite: individualisation, progressivité, prévention blessure, polarisation, spécificité terrain, gestion du D+, économie de course, puissance en montée, technique de descente, endurance musculaire, récupération, charge aiguë/chronique et adaptation au ressenti.
 Tu ne crées jamais un planning générique. Chaque séance doit avoir une intention physiologique claire et une logique dans la progression.
@@ -1136,30 +1180,8 @@ Chaque semaine doit contenir exactement ${dpw} séances. Chaque séance doit avo
       .filter(w => Number(w.numero) >= from && Number(w.numero) <= to)
       .map(w => {
         const target = weekTargets(Number(w.numero)||from);
-        const seances = (w.seances||[]).slice(0, Number(dpw)).map(s => {
-          const distance = normalizedDistance(s, target);
-          const cleanSession = { ...s, distance_km: distance, denivele_m: normalizedElev(s, target, distance) };
-          return {
-            jour: s.jour || 'Mar',
-            type: s.type || 'Endurance fondamentale',
-            duree: normalizeDuration(cleanSession, target),
-            distance_km: cleanSession.distance_km,
-            denivele_m: cleanSession.denivele_m,
-            zone: s.zone || 'Z2',
-            description: s.description || 'Séance contrôlée.',
-            objectif: s.objectif || w.focus || 'Objectif physiologique non précisé',
-            intensite: s.intensite || s.zone || 'Contrôlée',
-            allure: s.allure || 'Selon sensations et zone prévue',
-            rpe: s.rpe || '',
-            recuperation: s.recuperation || '',
-            echauffement: s.echauffement || '',
-            corps: s.corps || s.description || '',
-            retour_calme: s.retour_calme || '',
-            technique: s.technique || '',
-            nutrition: s.nutrition || '',
-            conseil: s.conseil || 'Reste à l’écoute des sensations.'
-          };
-        });
+        const blueprints = sessionBlueprints(Number(w.numero)||from, target);
+        const seances = blueprints.map((bp, idx) => coachSessionFromBlueprint(bp, (w.seances||[])[idx] || {}, target));
         const runKm = seances.reduce((a,s)=>a+(Number(s.distance_km)||0),0);
         const runElev = seances.reduce((a,s)=>a+(Number(s.denivele_m)||0),0);
         return {
@@ -1190,34 +1212,7 @@ Chaque semaine doit contenir exactement ${dpw} séances. Chaque séance doit avo
     for(let i=from;i<=to;i++){
       const target = weekTargets(i);
       const blueprints = sessionBlueprints(i, target);
-      const seances = blueprints.map((bp) => {
-        const type = bp.type;
-        const kmS = bp.distance_km;
-        const elevS = bp.denivele_m;
-        const isLong = type.includes('Sortie longue');
-        const isStrength = type.includes('Renforcement') || type.includes('Mobilité');
-        const isQuality = type.includes('Côtes') || type.includes('Tempo') || type.includes('Fractionné');
-        return {
-          jour: bp.jour,
-          type,
-          objectif: isLong ? 'Endurance spécifique trail, résistance musculaire, D+ et stratégie nutritionnelle' : isStrength ? 'Prévention blessure, stabilité bassin-cheville et force utile en montagne' : `${type}: ${bp.role}`,
-          duree: normalizeDuration({type, distance_km:kmS, denivele_m:elevS}, target),
-          distance_km: kmS,
-          denivele_m: elevS,
-          intensite: isQuality ? 'Soutenu contrôlé, jamais maximal' : isStrength ? 'Contrôlé' : 'Facile à modéré',
-          zone: bp.zone,
-          allure: isLong ? 'Rando-course en aisance, montées gérées, relances souples' : 'Selon zone, jamais à bloc',
-          rpe: isQuality ? '6-8/10' : isLong ? '4-6/10' : isStrength ? '3-5/10' : '3-4/10',
-          recuperation: target.phase === 'Récupération' ? '48h si fatigue élevée' : isQuality ? '24-36h sans intensité ensuite' : '24h selon sensations',
-          description: isLong ? `Sortie longue trail: ${kmS}km avec ${elevS}m+, départ très facile, montées en gestion, descentes propres, tester hydratation et alimentation.` : isStrength ? 'Circuit fonctionnel: gainage, fentes, step-up, mollets, ischios, proprioception cheville, sans chercher la fatigue maximale.' : `${type}: séance ciblée avec échauffement progressif, bloc principal maîtrisé, retour au calme. La qualité prime sur la vitesse.`,
-          echauffement: isStrength ? '8-10min mobilité hanches/chevilles + activation fessiers/mollets' : '15-20min facile + mobilité hanches/chevilles + 3 accélérations progressives si intensité',
-          corps: isLong ? `${kmS}km trail en endurance, marcher les pentes raides si nécessaire, rester régulier, finir avec encore de la marge.` : type.includes('Côtes longues') ? '5-8 répétitions de 3-5min en montée Z3-Z4, récupération en descente facile, posture haute.' : type.includes('Côtes courtes') ? '8-12 répétitions de 45-75s en côte dynamique, récupération complète, puissance propre.' : type.includes('Tempo') ? '2-3 blocs de 8-12min tempo trail Z3, récupération 3min facile, sans dérive excessive.' : isStrength ? '3 tours: 8-10 step-up/jambe, 10 fentes arrière/jambe, 30-45s gainage, 12 mollets, 8 dead bug/jambe, proprioception 45s/jambe.' : `${type} en respectant la zone prévue et la fraîcheur du jour.`,
-          retour_calme: '8-12min très facile + mobilité légère',
-          technique: isLong ? 'Regard loin, appuis courts en descente, cadence régulière en montée.' : 'Foulée relâchée, gainage actif, appuis silencieux.',
-          nutrition: isLong ? 'Tester 40-70g glucides/h + 500-750ml/h selon chaleur.' : 'Hydratation simple; glucides seulement si séance >75min ou intensité forte.',
-          conseil: target.phase === 'Récupération' ? 'Semaine allégée: tu dois finir plus frais que fatigué.' : isQuality ? 'Réussite = dernière répétition propre, pas forcément plus rapide. Stop si la foulée se dégrade.' : 'Séance réussie si tu respectes la zone et gardes une foulée propre jusqu’à la fin.'
-        };
-      });
+      const seances = blueprints.map(bp => coachSessionFromBlueprint(bp, {}, target));
       sems.push({
         numero:i,
         phase:target.phase,
