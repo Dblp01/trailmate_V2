@@ -240,6 +240,15 @@ select.fi{cursor:pointer}
 .raw-plan p{margin:0 0 12px}
 .raw-plan strong{color:var(--text)}
 .raw-bullet{margin:3px 0 3px 10px;color:var(--text2)}
+.raw-follow{margin-top:14px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:14px}
+.raw-follow h3{font-family:'Syne',sans-serif;font-size:16px;margin-bottom:10px}
+.raw-follow-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.raw-follow-grid .wide{grid-column:1/-1}
+.raw-log{margin-top:10px;padding:10px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs)}
+.raw-log.done{border-color:var(--gbr);background:linear-gradient(135deg,var(--gb),var(--bg3))}
+.raw-log-top{display:flex;align-items:center;gap:8px;justify-content:space-between;flex-wrap:wrap;margin-bottom:6px}
+.raw-log-title{font-size:13px;font-weight:700;color:var(--text)}
+.raw-log-meta{font-size:11px;color:var(--text3);display:flex;gap:8px;flex-wrap:wrap}
 
 /* STRAVA */
 .strava-connect-box{background:var(--stravab);border:1px solid rgba(252,76,2,.22);border-radius:var(--r);padding:20px;text-align:center;margin-bottom:16px}
@@ -1490,9 +1499,41 @@ function viewPlan(id){
   document.getElementById('pv-title').textContent = p.name;
   const d = p.data;
   if(d?.rawText){
+    const logs = d.rawLogs || [];
+    const logHtml = logs.length ? logs.map((l,idx) => `<div class="raw-log ${l.status==='Fait'?'done':''}">
+      <div class="raw-log-top">
+        <div class="raw-log-title">Semaine ${l.week || '?'} · ${escapeHtml(l.name || 'Séance')}</div>
+        <button class="btn btn-d btn-sm" onclick="deleteRawPlanLog(${id},${idx})">Supprimer</button>
+      </div>
+      <div class="raw-log-meta">
+        <span>${escapeHtml(l.status || 'À faire')}</span>
+        ${l.date ? `<span>${escapeHtml(l.date)}</span>` : ''}
+        ${l.duration ? `<span>⏱ ${escapeHtml(l.duration)}</span>` : ''}
+        ${l.elev ? `<span>⬆ ${escapeHtml(l.elev)}m+</span>` : ''}
+        ${l.feeling ? `<span>Ressenti: ${escapeHtml(l.feeling)}</span>` : ''}
+        ${l.fatigue ? `<span>Fatigue: ${escapeHtml(l.fatigue)}</span>` : ''}
+      </div>
+      ${l.notes ? `<div class="ps-desc">${escapeHtml(l.notes).replace(/\n/g,'<br>')}</div>` : ''}
+    </div>`).join('') : `<div style="font-size:12px;color:var(--text3);padding:8px 0">Aucune séance suivie pour ce plan.</div>`;
     document.getElementById('pv-content').innerHTML = `
       <div style="font-size:12px;color:var(--g);line-height:1.6;padding:10px 12px;background:var(--gb);border:1px solid var(--gbr);border-radius:var(--r);margin-bottom:12px">Plan texte généré directement par ChatGPT. Priorité aux durées, D+ et contenu spécifique.</div>
-      <div class="raw-plan">${formatRawPlan(d.rawText)}</div>`;
+      <div class="raw-plan">${formatRawPlan(d.rawText)}</div>
+      <div class="raw-follow">
+        <h3>Suivi des séances</h3>
+        <div class="raw-follow-grid">
+          <div><label class="fl">Semaine</label><input class="fi" id="raw-week-${id}" type="number" min="1" placeholder="1"></div>
+          <div><label class="fl">Séance</label><input class="fi" id="raw-name-${id}" placeholder="Côtes / Sortie longue"></div>
+          <div><label class="fl">Statut</label><select class="fi" id="raw-status-${id}"><option>Fait</option><option>À faire</option><option>Modifiée</option><option>Ratée</option></select></div>
+          <div><label class="fl">Date</label><input class="fi" id="raw-date-${id}" type="date" value="${tod()}"></div>
+          <div><label class="fl">Durée réalisée</label><input class="fi" id="raw-duration-${id}" placeholder="1h20"></div>
+          <div><label class="fl">D+ réalisé</label><input class="fi" id="raw-elev-${id}" type="number" placeholder="650"></div>
+          <div><label class="fl">Ressenti</label><select class="fi" id="raw-feeling-${id}"><option>Bien</option><option>Très facile</option><option>Dur mais propre</option><option>Trop dur</option><option>Douleur / alerte</option></select></div>
+          <div><label class="fl">Fatigue</label><select class="fi" id="raw-fatigue-${id}"><option>Normale</option><option>Faible</option><option>Élevée</option><option>Très élevée</option></select></div>
+          <div class="wide"><label class="fl">Notes</label><textarea class="fi" id="raw-notes-${id}" placeholder="Jambes, souffle, douleur, nutrition, terrain..."></textarea></div>
+        </div>
+        <button class="btn btn-p btn-sm" style="margin-top:10px" onclick="addRawPlanLog(${id})">Ajouter au suivi</button>
+        <div style="margin-top:12px">${logHtml}</div>
+      </div>`;
     openModal('modal-pv'); return;
   }
   if(!d?.semaines?.length){
@@ -1659,6 +1700,52 @@ function copyPlanSessionToDone(planId, weekIndex, sessionIndex){
   save('sessions');
   save('plans');
   renderPlans(); renderSessions(); renderDash(); viewPlan(planId);
+}
+
+function addRawPlanLog(planId){
+  const p = DB.plans.find(x => x.id === planId);
+  if(!p?.data?.rawText) return;
+  const get = id => document.getElementById(`${id}-${planId}`)?.value || '';
+  const log = {
+    id: Date.now(),
+    week: get('raw-week'),
+    name: get('raw-name'),
+    status: get('raw-status'),
+    date: get('raw-date') || tod(),
+    duration: get('raw-duration'),
+    elev: get('raw-elev'),
+    feeling: get('raw-feeling'),
+    fatigue: get('raw-fatigue'),
+    notes: get('raw-notes')
+  };
+  p.data.rawLogs = p.data.rawLogs || [];
+  p.data.rawLogs.unshift(log);
+  if(log.status === 'Fait'){
+    DB.sessions.push({
+      id: Date.now() + 1,
+      plan_id: planId,
+      type: log.name || 'Séance planifiée',
+      date: log.date,
+      km: 0,
+      dur: log.duration,
+      elev: parseInt(log.elev)||0,
+      hr: 0,
+      notes: log.notes,
+      feedback: `Ressenti: ${log.feeling || '-'} · Fatigue: ${log.fatigue || '-'}`,
+      source: 'plan'
+    });
+    save('sessions');
+  }
+  save('plans');
+  renderPlans(); renderSessions(); renderDash(); viewPlan(planId);
+}
+
+function deleteRawPlanLog(planId, logIndex){
+  const p = DB.plans.find(x => x.id === planId);
+  if(!p?.data?.rawLogs) return;
+  p.data.rawLogs.splice(logIndex, 1);
+  save('plans');
+  renderPlans(); renderDash(); viewPlan(planId);
 }
 
 async function regenerateWeek(planId, weekIndex){
