@@ -234,6 +234,12 @@ select.fi{cursor:pointer}
 .ps-steps{font-size:12px;color:var(--text2);line-height:1.65;padding-left:17px;margin:0}
 .ps-steps li{margin-bottom:4px}
 .ps-feel{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px}
+.raw-plan{font-size:14px;color:var(--text2);line-height:1.75;padding:16px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);white-space:normal}
+.raw-plan h3{font-family:'Syne',sans-serif;font-size:17px;color:var(--g);margin:20px 0 8px;border-top:1px solid var(--border);padding-top:16px}
+.raw-plan h3:first-child{margin-top:0;border-top:0;padding-top:0}
+.raw-plan p{margin:0 0 12px}
+.raw-plan strong{color:var(--text)}
+.raw-bullet{margin:3px 0 3px 10px;color:var(--text2)}
 
 /* STRAVA */
 .strava-connect-box{background:var(--stravab);border:1px solid rgba(252,76,2,.22);border-radius:var(--r);padding:20px;text-align:center;margin-bottom:16px}
@@ -800,6 +806,22 @@ function renderProfileUI(){
   document.querySelector('.team-title').textContent = cloudStatus === 'sync' ? 'Équipe · Cloud' : 'Équipe · Local';
 }
 
+function escapeHtml(str){
+  return String(str || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function formatRawPlan(text){
+  let safe = escapeHtml(text)
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/^###?\s+(.+)$/gm, '<h3>$1</h3>')
+    .replace(/^SEMAINE\s+(.+)$/gmi, '<h3>Semaine $1</h3>')
+    .replace(/^- (.+)$/gm, '<div class="raw-bullet">• $1</div>');
+  return safe.split(/\n{2,}/).map(block => {
+    if(block.includes('<h3>')) return block;
+    return `<p>${block.replace(/\n/g,'<br>')}</p>`;
+  }).join('');
+}
+
 // ═══════════════════════════════════════════
 // NAVIGATION
 // ═══════════════════════════════════════════
@@ -1267,6 +1289,37 @@ Contraintes JSON:
 - Aucun texte hors JSON.`;
   }
 
+  function mkRawPlanPrompt(){
+    return `Tu es ChatGPT, coach expert trail running et ultra-trail. Fais exactement comme si l'utilisateur te demandait dans ChatGPT un plan d'entraînement.
+
+Contexte:
+- Course: ${race}
+- Date: ${date}
+- Objectif: ${dist || '?'} km / ${elev || '?'} m+
+- Temps disponible: environ ${weeks} semaines
+- Niveau: ${level}
+- Séances disponibles: ${dpw} séances par semaine
+- Infos utilisateur: ${goal || 'finisher, plan réaliste'}
+- Historique récent: ${recent.map(s=>`${s.date} ${s.type} ${s.km||'?'}km ${s.elev||0}m+ ${s.dur||''} ${s.notes||''}`).join(' | ') || 'aucun'}
+
+Je veux un plan comme celui-ci:
+- Introduction courte avec logique globale.
+- Structure de semaine.
+- Intensités expliquées simplement.
+- Puis SEMAINE 1, SEMAINE 2, etc.
+- Pour chaque séance: durée, D+ approximatif si utile, contenu précis.
+- Pas de distances, sauf si vraiment utile. Ne mets pas de km dans les sorties longues.
+- Pas de tableau.
+- Pas de JSON.
+- Pas de séance "repos" comptée dans les ${dpw} séances.
+- Sorties longues en durée + D+ du type: "2h30 trail, 800-1200 D+".
+- Séances qualité du type: "1h10 total: 20 min EF + 8 x 2 min montée soutenue récup descente + 15 min retour calme".
+- Renfo court intégré si pertinent.
+- Plan réaliste, progressif, spécifique trail, sans volume de champion du monde.
+
+Réponds en français, directement avec le plan complet, clair et exploitable.`;
+  }
+
   function extract(raw){
     if(!raw) return null;
     const cleaned = raw
@@ -1400,16 +1453,14 @@ Contraintes JSON:
 
   try{
     msgEl.textContent = `Génération du plan complet avec ChatGPT…`;
-    const rawPlan = await getJsonPart(mkFullPlanPrompt(), 'plan complet ChatGPT', 12000, 'gpt-4.1-mini');
-    const normalized = normalizePlanPart(rawPlan, 1, weeks);
+    const rawText = await claude([{role:'user', content: mkRawPlanPrompt()}], 'Tu es ChatGPT coach trail. Réponds en français avec un plan clair, sans JSON.', 9000, 'gpt-4.1-mini');
     const planData = {
-      resume: rawPlan?.resume || `Plan ${weeks} semaines pour ${race}.`,
-      phases: rawPlan?.phases || [],
-      semaines: normalized?.semaines || []
+      rawText,
+      resume: `Plan généré par ChatGPT en durées + D+, sans distances imposées.`,
+      phases: [],
+      semaines: []
     };
-    msgEl.textContent = 'Assemblage du plan…';
-
-    if(!planData.semaines.length) throw new Error('Plan ChatGPT invalide');
+    if(!rawText || rawText.length < 500) throw new Error('Réponse ChatGPT trop courte');
 
     DB.plans.push({ id:Date.now(), name, race, date, dist, elev, level, dpw, goal, data:planData, createdAt:new Date().toISOString(), provider:'openai' });
     save('plans');
@@ -1438,6 +1489,12 @@ function viewPlan(id){
   if(!p) return;
   document.getElementById('pv-title').textContent = p.name;
   const d = p.data;
+  if(d?.rawText){
+    document.getElementById('pv-content').innerHTML = `
+      <div style="font-size:12px;color:var(--g);line-height:1.6;padding:10px 12px;background:var(--gb);border:1px solid var(--gbr);border-radius:var(--r);margin-bottom:12px">Plan texte généré directement par ChatGPT. Priorité aux durées, D+ et contenu spécifique.</div>
+      <div class="raw-plan">${formatRawPlan(d.rawText)}</div>`;
+    openModal('modal-pv'); return;
+  }
   if(!d?.semaines?.length){
     document.getElementById('pv-content').innerHTML = '<p style="color:var(--text3);padding:20px 0">Plan ancien format — supprime et recrée-le.</p>';
     openModal('modal-pv'); return;
@@ -1640,7 +1697,7 @@ function renderPlans(){
   }
   el.innerHTML = DB.plans.map(p => {
     const days = Math.ceil((new Date(p.date) - new Date()) / 86400000);
-    const nSem = p.data?.semaines?.length || 0;
+    const nSem = p.data?.rawText ? (p.data.rawText.match(/SEMAINE/gi)||[]).length : (p.data?.semaines?.length || 0);
     const totKm= p.data?.semaines?.reduce((a,s) => a+(s.volume_km||0), 0) || 0;
     const cols  = ['var(--blue)','var(--amber)','var(--red)','var(--g)'];
     const phases= p.data?.phases || [];
@@ -1654,7 +1711,7 @@ function renderPlans(){
             <span style="color:${days>0?'var(--g)':'var(--text3)'}">${days>0?'Dans '+days+' j':'Passée'}</span>
             ${p.fallback || p.partialFallback ? `<span style="color:var(--amber)">Secours partiel</span>` : `<span style="color:var(--g)">IA expert</span>`}
           </div>
-          ${nSem ? `<div style="display:flex;gap:10px;margin-top:6px;font-size:11px;color:var(--text2)"><span>📋 ${nSem} semaines</span><span>🏃 ${totKm}km total</span><span>💪 ${p.dpw||'?'} séances/sem</span></div>` : ''}
+          ${nSem ? `<div style="display:flex;gap:10px;margin-top:6px;font-size:11px;color:var(--text2)"><span>📋 ${nSem} semaines</span>${totKm ? `<span>🏃 ${totKm}km total</span>` : '<span>⏱ Durées + D+</span>'}<span>💪 ${p.dpw||'?'} séances/sem</span></div>` : ''}
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
           <button class="btn btn-p btn-sm" onclick="viewPlan(${p.id})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Voir</button>
