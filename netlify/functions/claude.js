@@ -7,7 +7,7 @@ exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
   if (event.httpMethod !== 'POST') return { statusCode: 405, headers, body: 'Method Not Allowed' };
   try {
-    const { messages, system, max_tokens } = JSON.parse(event.body);
+    const { messages, system, max_tokens, model } = JSON.parse(event.body);
     if (process.env.OPENAI_API_KEY) {
       const res = await fetch('https://api.openai.com/v1/responses', {
         method: 'POST',
@@ -16,7 +16,7 @@ exports.handler = async (event) => {
           'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
         },
         body: JSON.stringify({
-          model: process.env.OPENAI_MODEL || 'gpt-5',
+          model: model || process.env.OPENAI_MODEL || 'gpt-4.1-mini',
           instructions: system || '',
           input: (messages || []).map(m => `${String(m.role || 'user').toUpperCase()}: ${m.content || ''}`).join('\n\n'),
           max_output_tokens: max_tokens || 3000,

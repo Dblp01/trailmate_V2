@@ -830,12 +830,12 @@ function fillStravaConfigModal(){
 // ═══════════════════════════════════════════
 // IA API
 // ═══════════════════════════════════════════
-async function claude(messages, sys, maxTok){
+async function claude(messages, sys, maxTok, model='gpt-4.1-mini'){
   const res = await fetch('/.netlify/functions/claude', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'gpt-5',
+      model,
       max_tokens: maxTok || 1500,
       system: sys || getSys(),
       messages
@@ -1277,8 +1277,8 @@ Contraintes JSON:
     try{ return JSON.parse(m[0]); } catch(e){ return null; }
   }
 
-  async function getJsonPart(prompt, label){
-    const raw = await claude([{role:'user', content: prompt}], SYS, 18000);
+  async function getJsonPart(prompt, label, maxTok=12000, model='gpt-4.1-mini'){
+    const raw = await claude([{role:'user', content: prompt}], SYS, maxTok, model);
     let data = extract(raw);
     if(data?.semaines?.length) return data;
 
@@ -1286,7 +1286,7 @@ Contraintes JSON:
     const repaired = await claude([{
       role:'user',
       content: `La réponse suivante n'est pas un JSON exploitable pour TrailMate. Renvoie UNIQUEMENT un JSON valide avec une clé "semaines" non vide, sans markdown, sans commentaire.\n\nRéponse à corriger:\n${raw || '(vide)'}\n\nDemande originale:\n${prompt}`
-    }], SYS, 18000);
+    }], SYS, maxTok, model);
     data = extract(repaired);
     if(data?.semaines?.length) return data;
 
@@ -1398,7 +1398,7 @@ Contraintes JSON:
 
   try{
     msgEl.textContent = `Génération du plan complet avec ChatGPT…`;
-    const rawPlan = await getJsonPart(mkFullPlanPrompt(), 'plan complet ChatGPT');
+    const rawPlan = await getJsonPart(mkFullPlanPrompt(), 'plan complet ChatGPT', 12000, 'gpt-4.1-mini');
     const normalized = normalizePlanPart(rawPlan, 1, weeks);
     const planData = {
       resume: rawPlan?.resume || `Plan ${weeks} semaines pour ${race}.`,
@@ -1897,7 +1897,7 @@ async function sendChat(){
     const res = await fetch('/.netlify/functions/claude', {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({ model:'gpt-5', max_tokens:1500, system:getSys(), messages:chatHistory })
+      body: JSON.stringify({ model:'gpt-4.1-mini', max_tokens:1500, system:getSys(), messages:chatHistory })
     });
     const d = await res.json();
     if(!res.ok) throw new Error(d.error?.message || d.error || 'Erreur API '+res.status);
