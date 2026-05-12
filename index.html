@@ -874,10 +874,13 @@ async function claude(messages, sys, maxTok, model='gpt-4.1-mini'){
   });
   if(!res.ok){
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error?.message || 'Erreur API '+res.status);
+    const apiMsg = err.error?.message || err.message || JSON.stringify(err).slice(0, 180);
+    throw new Error(apiMsg ? `Erreur API ${res.status} : ${apiMsg}` : `Erreur API ${res.status}`);
   }
   const d = await res.json();
-  return d.content?.find(c => c.type === 'text')?.text || '';
+  const text = d.content?.find(c => c.type === 'text')?.text || '';
+  if(!text.trim()) throw new Error(`Réponse ChatGPT vide (${d.model || model || 'modèle inconnu'})`);
+  return text;
 }
 
 function getSys(){
@@ -1329,6 +1332,24 @@ Je veux un plan comme celui-ci:
 Réponds en français, directement avec le plan complet, clair et exploitable.`;
   }
 
+  function mkCompactRawPlanPrompt(){
+    return `Crée un plan trail réaliste en français, comme une réponse ChatGPT claire.
+
+Course: ${race}, ${dist || '?'} km, ${elev || '?'} m+, date ${date}.
+Durée: ${weeks} semaines. Niveau: ${level}. Disponibilité: ${dpw} séances/semaine.
+Infos: ${goal || 'objectif finisher, plan progressif, éviter blessure'}.
+Historique récent: ${recent.map(s=>`${s.date} ${s.type} ${s.km||'?'}km ${s.elev||0}m+ ${s.dur||''}`).join(' | ') || 'aucun'}.
+
+Format obligatoire:
+Introduction courte.
+Structure de semaine.
+Intensités simples.
+Puis SEMAINE 1 à SEMAINE ${weeks}.
+Pour chaque semaine: 3 à ${dpw} séances utiles seulement, avec durée, D+ approximatif, contenu précis, objectif.
+Ne donne pas de distances. Sorties longues en durée + D+ uniquement.
+Plan adapté au niveau actuel, progressif, sans volumes absurdes, sans JSON, sans tableau.`;
+  }
+
   function extract(raw){
     if(!raw) return null;
     const cleaned = raw
@@ -1462,14 +1483,25 @@ Réponds en français, directement avec le plan complet, clair et exploitable.`;
 
   try{
     msgEl.textContent = `Génération du plan complet avec ChatGPT…`;
-    const rawText = await claude([{role:'user', content: mkRawPlanPrompt()}], 'Tu es ChatGPT coach trail. Réponds en français avec un plan clair, sans JSON.', 9000, 'gpt-4.1-mini');
+    let rawText = '';
+    try{
+      rawText = await claude([{role:'user', content: mkRawPlanPrompt()}], 'Tu es ChatGPT coach trail. Réponds en français avec un plan clair, sans JSON.', 7000, 'gpt-4.1-mini');
+    } catch(firstError){
+      console.warn('Premier essai ChatGPT échoué', firstError);
+      msgEl.textContent = `ChatGPT a répondu avec une erreur, deuxième essai plus léger…`;
+      rawText = await claude([{role:'user', content: mkCompactRawPlanPrompt()}], 'Tu es ChatGPT coach trail. Réponds en français avec un plan clair, sans JSON.', 5500, 'gpt-4.1-mini');
+    }
+    if(!rawText || rawText.trim().length < 220){
+      msgEl.textContent = `Réponse trop courte, relance compacte…`;
+      rawText = await claude([{role:'user', content: mkCompactRawPlanPrompt()}], 'Tu es ChatGPT coach trail. Réponds en français avec un plan clair, sans JSON.', 5500, 'gpt-4.1-mini');
+    }
     const planData = {
       rawText,
       resume: `Plan généré par ChatGPT en durées + D+, sans distances imposées.`,
       phases: [],
       semaines: []
     };
-    if(!rawText || rawText.length < 500) throw new Error('Réponse ChatGPT trop courte');
+    if(!rawText || rawText.trim().length < 220) throw new Error('Réponse ChatGPT trop courte après deux essais');
 
     DB.plans.push({ id:Date.now(), name, race, date, dist, elev, level, dpw, goal, data:planData, createdAt:new Date().toISOString(), provider:'openai' });
     save('plans');
@@ -1480,9 +1512,9 @@ Réponds en français, directement avec le plan complet, clair et exploitable.`;
     btn.disabled = false;
     go('plans');
   } catch(e){
-    msgEl.textContent = 'Erreur ChatGPT : ' + e.message;
-    alert('Impossible de générer le plan avec ChatGPT : '+e.message);
-    genBox.style.display = 'none';
+    console.error('Erreur génération plan ChatGPT', e);
+    msgEl.innerHTML = `Erreur ChatGPT : ${escapeHtml(e.message || String(e))}<br><span style="color:var(--text3)">Recharge la page puis réessaie. Si ça continue, vérifie OPENAI_API_KEY et les crédits OpenAI.</span>`;
+    alert('Impossible de générer le plan avec ChatGPT : '+(e.message || e));
     btn.disabled = false;
   }
 }
