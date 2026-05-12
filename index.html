@@ -240,6 +240,18 @@ select.fi{cursor:pointer}
 .raw-plan p{margin:0 0 12px}
 .raw-plan strong{color:var(--text)}
 .raw-bullet{margin:3px 0 3px 10px;color:var(--text2)}
+.raw-intro{font-size:13px;line-height:1.7;margin-bottom:14px;color:var(--text2)}
+.raw-week{border-top:1px solid var(--border);padding-top:16px;margin-top:18px}
+.raw-week:first-child{border-top:0;padding-top:0;margin-top:0}
+.raw-week-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.raw-week-title{font-family:'Syne',sans-serif;font-size:18px;color:var(--g);font-weight:800}
+.raw-week-note{font-size:12px;color:var(--text3);line-height:1.6;margin-bottom:10px}
+.raw-session{background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:12px;margin:10px 0}
+.raw-session-top{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;margin-bottom:8px}
+.raw-session-title{font-size:14px;color:var(--text);font-weight:800;line-height:1.35}
+.raw-session-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.raw-chip{font-size:11px;color:var(--g);background:var(--gb);border:1px solid var(--gbr);border-radius:999px;padding:3px 8px;font-weight:700}
+.raw-session-body{font-size:13px;line-height:1.7;color:var(--text2)}
 .raw-follow{margin-top:14px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:14px}
 .raw-follow h3{font-family:'Syne',sans-serif;font-size:16px;margin-bottom:10px}
 .raw-follow-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
@@ -819,7 +831,88 @@ function escapeHtml(str){
   return String(str || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-function formatRawPlan(text){
+function escapeAttr(str){
+  return escapeHtml(str).replace(/\n/g, ' ');
+}
+
+function inlinePlanHtml(text){
+  return escapeHtml(text)
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/^- (.+)$/gm, '<div class="raw-bullet">• $1</div>')
+    .replace(/\n/g, '<br>');
+}
+
+function sessionMetaFromTitle(title){
+  const meta = {};
+  const duration = String(title || '').match(/\b(\d+h(?:\d{2})?|\d+\s*min)\b/i);
+  const elev = String(title || '').match(/(\d{2,5})\s*m\+/i);
+  if(duration) meta.duration = duration[1].replace(/\s+/g,'');
+  if(elev) meta.elev = elev[1];
+  return meta;
+}
+
+function formatStructuredRawPlan(text, planId){
+  const source = String(text || '').replace(/\r/g, '').replace(/^\s*---+\s*$/gm, '').trim();
+  const weekRegex = /(?:^|\n)\s*(?:#{1,3}\s*)?(?:\*\*)?\s*Semaine\s+(\d+[^\n:]*)\s*(?:\*\*)?/gi;
+  const weeks = [];
+  let match;
+  while((match = weekRegex.exec(source))){
+    weeks.push({ label: match[1].trim(), start: match.index, bodyStart: weekRegex.lastIndex });
+  }
+  if(!weeks.length) return '';
+
+  const intro = source.slice(0, weeks[0].start).trim();
+  const weekHtml = weeks.map((week, idx) => {
+    const nextStart = weeks[idx + 1]?.start ?? source.length;
+    const body = source.slice(week.bodyStart, nextStart).trim();
+    const sessionRegex = /(?:^|\n|\.\s+)\s*((?:Séance\s+\d+|Renforcement|Renfo)(?:\s*\([^)]*\))?\s*:)/gi;
+    const sessions = [];
+    let sm;
+    while((sm = sessionRegex.exec(body))){
+      sessions.push({ title: sm[1].replace(/:$/,'').trim(), start: sm.index, bodyStart: sessionRegex.lastIndex });
+    }
+    if(!sessions.length){
+      return `<section class="raw-week">
+        <div class="raw-week-head"><div class="raw-week-title">Semaine ${escapeHtml(week.label)}</div></div>
+        <div class="raw-session-body">${inlinePlanHtml(body)}</div>
+      </section>`;
+    }
+
+    const weekNote = body.slice(0, sessions[0].start).trim().replace(/^\.+\s*/, '');
+    const sessionsHtml = sessions.map((s, sidx) => {
+      const nextSessionStart = sessions[sidx + 1]?.start ?? body.length;
+      const sessionBody = body.slice(s.bodyStart, nextSessionStart).trim().replace(/^\s*[:.-]\s*/, '');
+      const meta = sessionMetaFromTitle(s.title);
+      const cleanTitle = s.title.replace(/^Renfo\b/i, 'Renforcement');
+      const chips = [
+        meta.duration ? `<span class="raw-chip">${escapeHtml(meta.duration)}</span>` : '',
+        meta.elev ? `<span class="raw-chip">${escapeHtml(meta.elev)} m+</span>` : ''
+      ].join('');
+      return `<article class="raw-session">
+        <div class="raw-session-top">
+          <div>
+            <div class="raw-session-title">${escapeHtml(cleanTitle)}</div>
+            ${chips ? `<div class="raw-session-meta">${chips}</div>` : ''}
+          </div>
+          ${planId ? `<button class="btn btn-g btn-sm" onclick="prefillRawPlanLog(${planId},'${encodeURIComponent(week.label)}','${encodeURIComponent(cleanTitle)}','${encodeURIComponent(meta.duration || '')}','${encodeURIComponent(meta.elev || '')}')">Suivre</button>` : ''}
+        </div>
+        <div class="raw-session-body">${inlinePlanHtml(sessionBody)}</div>
+      </article>`;
+    }).join('');
+
+    return `<section class="raw-week">
+      <div class="raw-week-head"><div class="raw-week-title">Semaine ${escapeHtml(week.label)}</div></div>
+      ${weekNote ? `<div class="raw-week-note">${inlinePlanHtml(weekNote)}</div>` : ''}
+      ${sessionsHtml}
+    </section>`;
+  }).join('');
+
+  return `${intro ? `<div class="raw-intro">${inlinePlanHtml(intro)}</div>` : ''}${weekHtml}`;
+}
+
+function formatRawPlan(text, planId){
+  const structured = formatStructuredRawPlan(text, planId);
+  if(structured) return structured;
   let safe = escapeHtml(text)
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/^###?\s+(.+)$/gm, '<h3>$1</h3>')
@@ -1549,7 +1642,7 @@ function viewPlan(id){
     </div>`).join('') : `<div style="font-size:12px;color:var(--text3);padding:8px 0">Aucune séance suivie pour ce plan.</div>`;
     document.getElementById('pv-content').innerHTML = `
       <div style="font-size:12px;color:var(--g);line-height:1.6;padding:10px 12px;background:var(--gb);border:1px solid var(--gbr);border-radius:var(--r);margin-bottom:12px">Plan texte généré directement par ChatGPT. Priorité aux durées, D+ et contenu spécifique.</div>
-      <div class="raw-plan">${formatRawPlan(d.rawText)}</div>
+      <div class="raw-plan">${formatRawPlan(d.rawText, id)}</div>
       <div class="raw-follow">
         <h3>Suivi des séances</h3>
         <div class="raw-follow-grid">
@@ -1732,6 +1825,22 @@ function copyPlanSessionToDone(planId, weekIndex, sessionIndex){
   save('sessions');
   save('plans');
   renderPlans(); renderSessions(); renderDash(); viewPlan(planId);
+}
+
+function prefillRawPlanLog(planId, week, name, duration, elev){
+  const decode = v => {
+    try{ return decodeURIComponent(v || ''); } catch(e){ return v || ''; }
+  };
+  const set = (id, value) => {
+    const el = document.getElementById(`${id}-${planId}`);
+    if(el) el.value = value;
+  };
+  set('raw-week', decode(week).replace(/[^\d]/g,'') || decode(week));
+  set('raw-name', decode(name));
+  set('raw-duration', decode(duration));
+  set('raw-elev', decode(elev));
+  set('raw-status', 'À faire');
+  document.getElementById(`raw-notes-${planId}`)?.focus();
 }
 
 function addRawPlanLog(planId){
