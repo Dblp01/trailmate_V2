@@ -901,17 +901,32 @@ function normalizeRawPlanSource(text){
     .replace(/\*\*((?:Séance\s+\d+|Renforcement|Renfo)[^*]+?)\*\*\s*：/gi, '$1:')
     .replace(/([.!?])\s+((?:Séance\s+\d+|Renforcement|Renfo)\b)/gi, '$1\n$2')
     .replace(/([^\n])\s+(\*\*(?:Séance\s+\d+|Renforcement|Renfo)\b)/gi, '$1\n$2')
+    .replace(/([.!?])\s+(\d+\.\s*[A-ZÉÈÀÂÎÔÛÄËÏÖÜÇ][^\n]{0,45}\s+[–-])/g, '$1\n$2')
     .replace(/(?:^|\n)\s*#{1,4}\s*/g, '\n')
     .trim();
 }
 
+function cleanNumberedSessionTitle(raw){
+  const txt = String(raw || '').replace(/\s+/g, ' ').trim();
+  const parts = txt.match(/^(\d+)\.\s*([^–-]+)\s*[–-]\s*(.*)$/);
+  if(!parts) return txt;
+  const day = parts[2].trim();
+  const rest = parts[3].trim();
+  const meta = rest.match(/^([^:;,]+?(?:\d+h(?:\d{2})?|\d+\s*min)[^:;,]*?(?:\d{2,5}\s*m\+)?)/i);
+  return `Séance ${parts[1]} (${day}${meta ? `, ${meta[1].trim()}` : ''})`;
+}
+
 function splitRawPlanSessions(body){
   const normalized = normalizeRawPlanSource(body);
-  const sessionRegex = /(?:^|\n)\s*(?:\*\*)?\s*((?:Séance\s+\d+|Renforcement|Renfo)(?:\s*\([^)]*\))?)\s*(?:\*\*)?\s*[:：]/gi;
+  const sessionRegex = /(?:^|\n)\s*(?:(?:\*\*)?\s*((?:Séance\s+\d+|Renforcement|Renfo)(?:\s*\([^)]*\))?)\s*(?:\*\*)?\s*[:：]|(\d+\.\s*[^\n–-]{2,35}\s*[–-]\s*))/gi;
   const sessions = [];
   let sm;
   while((sm = sessionRegex.exec(normalized))){
-    sessions.push({ title: sm[1].trim(), start: sm.index, bodyStart: sessionRegex.lastIndex });
+    sessions.push({
+      title: sm[1] ? sm[1].trim() : cleanNumberedSessionTitle(sm[2]),
+      start: sm.index,
+      bodyStart: sessionRegex.lastIndex
+    });
   }
   return { normalized, sessions };
 }
