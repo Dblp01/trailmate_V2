@@ -326,6 +326,12 @@ select.fi{cursor:pointer}
   #modal-pv.overlay{padding:0;align-items:stretch}
   #modal-pv .modal-hd{position:sticky;top:0;background:var(--bg2);z-index:2;padding-bottom:10px}
   #pv-content{padding-bottom:22px}
+  .raw-plan{padding:11px;font-size:13px;line-height:1.65}
+  .raw-week{padding-top:13px;margin-top:14px}
+  .raw-week-title{font-size:20px}
+  .raw-session{padding:11px;margin:9px 0}
+  .raw-session-title{font-size:13px}
+  .raw-follow-grid{grid-template-columns:1fr}
   .modal-footer{position:sticky;bottom:-18px;background:var(--bg2);padding-top:12px;flex-wrap:wrap}
   .modal-footer .btn{flex:1;justify-content:center}
   .pw-hd{align-items:flex-start}
@@ -641,6 +647,9 @@ let serverConfig = { hasOpenAI:false, hasAnthropic:false, aiProvider:'', stravaC
 let cloudData = null;
 let cloudTimer = null;
 let cloudStatus = 'local';
+const CLOUD_SYNC_ORIGIN = (location.hostname === '127.0.0.1' || location.hostname === 'localhost')
+  ? 'https://trailmate-v2.netlify.app'
+  : '';
 
 function storageKey(k){ return `tm_${activeProfile}_${k}`; }
 function readJson(k, fallback){
@@ -756,6 +765,10 @@ function emptyCloudData(){
   return { version:1, updatedAt:new Date().toISOString(), profiles:{ dimitri:{plans:[],sessions:[],races:[],briefs:[]}, lonny:{plans:[],sessions:[],races:[],briefs:[]} } };
 }
 
+function cloudDataUrl(){
+  return `${CLOUD_SYNC_ORIGIN}/.netlify/functions/data`;
+}
+
 function profileSnapshot(id){
   if(id === activeProfile) return { plans:DB.plans, sessions:DB.sessions, races:DB.races, briefs:DB.briefs };
   return {
@@ -775,16 +788,38 @@ function hasProfileData(data){
   return ['plans','sessions','races','briefs'].some(k => (data?.[k] || []).length);
 }
 
+function mergeLists(localList=[], remoteList=[]){
+  const map = new Map();
+  [...localList, ...remoteList].forEach(item => {
+    if(!item) return;
+    const id = item.id || `${item.date || ''}-${item.name || item.type || ''}-${Math.random()}`;
+    map.set(String(id), item);
+  });
+  return [...map.values()];
+}
+
+function mergeProfileData(local={}, remote={}){
+  return {
+    plans: mergeLists(local.plans, remote.plans),
+    sessions: mergeLists(local.sessions, remote.sessions),
+    races: mergeLists(local.races, remote.races),
+    briefs: mergeLists(local.briefs, remote.briefs)
+  };
+}
+
 async function loadCloudData(){
   try{
-    const res = await fetch('/.netlify/functions/data');
+    const res = await fetch(cloudDataUrl());
     if(!res.ok) throw new Error('cloud '+res.status);
     cloudData = await res.json();
     for(const id of Object.keys(PROFILES)){
       const remote = cloudData.profiles?.[id];
       const local = profileSnapshot(id);
-      if(hasProfileData(remote)) saveProfileSnapshot(id, remote);
-      else if(hasProfileData(local)) cloudData.profiles[id] = local;
+      const merged = mergeProfileData(local, remote);
+      if(hasProfileData(merged)){
+        saveProfileSnapshot(id, merged);
+        cloudData.profiles[id] = merged;
+      }
     }
     loadProfile();
     cloudStatus = 'sync';
@@ -807,7 +842,7 @@ async function saveCloudNow(){
   for(const id of Object.keys(PROFILES)) cloudData.profiles[id] = profileSnapshot(id);
   cloudData.updatedAt = new Date().toISOString();
   try{
-    const res = await fetch('/.netlify/functions/data', {
+    const res = await fetch(cloudDataUrl(), {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify(cloudData)
@@ -1611,7 +1646,8 @@ Plan adapté au niveau actuel, progressif, sans volumes absurdes, sans JSON, san
     };
     if(!rawText || rawText.trim().length < 220) throw new Error('Réponse ChatGPT trop courte après deux essais');
 
-    DB.plans.push({ id:Date.now(), name, race, date, dist, elev, level, dpw, goal, data:planData, createdAt:new Date().toISOString(), provider:'openai' });
+    const newPlan = { id:Date.now(), name, race, date, dist, elev, level, dpw, goal, data:planData, createdAt:new Date().toISOString(), provider:'openai' };
+    DB.plans.push(newPlan);
     save('plans');
     renderAll();
     closeModal('modal-plan');
@@ -1619,6 +1655,7 @@ Plan adapté au niveau actuel, progressif, sans volumes absurdes, sans JSON, san
     genBox.style.display = 'none';
     btn.disabled = false;
     go('plans');
+    viewPlan(newPlan.id);
   } catch(e){
     console.error('Erreur génération plan ChatGPT', e);
     msgEl.innerHTML = `Erreur ChatGPT : ${escapeHtml(e.message || String(e))}<br><span style="color:var(--text3)">Recharge la page puis réessaie. Si ça continue, vérifie OPENAI_API_KEY et les crédits OpenAI.</span>`;
