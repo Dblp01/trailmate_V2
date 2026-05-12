@@ -1,11 +1,12 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { URL } = require('url');
 
 const root = __dirname;
 const port = Number(process.env.PORT || 8888);
-const host = process.env.HOST || '127.0.0.1';
+const host = process.env.HOST || '0.0.0.0';
 
 loadEnv(path.join(root, '.env'));
 
@@ -47,7 +48,18 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(port, host, () => {
   console.log(`TrailMate local: http://${host}:${port}`);
+  getLanUrls(port).forEach(url => console.log(`TrailMate téléphone: ${url}`));
 });
+
+function getLanUrls(port) {
+  const urls = [];
+  for (const addresses of Object.values(os.networkInterfaces())) {
+    for (const net of addresses || []) {
+      if (net.family === 'IPv4' && !net.internal) urls.push(`http://${net.address}:${port}`);
+    }
+  }
+  return urls;
+}
 
 async function handleFunction(req, res, name) {
   const handler = functions[name];

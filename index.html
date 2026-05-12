@@ -258,6 +258,7 @@ select.fi{cursor:pointer}
 .raw-session.open .raw-open{transform:rotate(90deg);color:var(--g);border-color:var(--gbr)}
 .raw-session-body{display:none;font-size:13px;line-height:1.7;color:var(--text2);margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
 .raw-session.open .raw-session-body{display:block}
+.raw-week-fallback{display:block;font-size:13px;line-height:1.7;color:var(--text2);margin-top:8px}
 .raw-follow{margin-top:14px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:14px}
 .raw-follow h3{font-family:'Syne',sans-serif;font-size:16px;margin-bottom:10px}
 .raw-follow-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
@@ -892,12 +893,31 @@ function sessionMetaFromTitle(title){
   return meta;
 }
 
-function formatStructuredRawPlan(text, planId){
-  const source = String(text || '')
+function normalizeRawPlanSource(text){
+  return String(text || '')
     .replace(/\r/g, '')
-    .replace(/\*\*((?:Séance\s+\d+|Renforcement|Renfo)[^*]+)\*\*\s*:/gi, '$1:')
     .replace(/^\s*---+\s*$/gm, '')
+    .replace(/\*\*((?:Séance\s+\d+|Renforcement|Renfo)[^*]+?)\*\*\s*:/gi, '$1:')
+    .replace(/\*\*((?:Séance\s+\d+|Renforcement|Renfo)[^*]+?)\*\*\s*：/gi, '$1:')
+    .replace(/([.!?])\s+((?:Séance\s+\d+|Renforcement|Renfo)\b)/gi, '$1\n$2')
+    .replace(/([^\n])\s+(\*\*(?:Séance\s+\d+|Renforcement|Renfo)\b)/gi, '$1\n$2')
+    .replace(/(?:^|\n)\s*#{1,4}\s*/g, '\n')
     .trim();
+}
+
+function splitRawPlanSessions(body){
+  const normalized = normalizeRawPlanSource(body);
+  const sessionRegex = /(?:^|\n)\s*(?:\*\*)?\s*((?:Séance\s+\d+|Renforcement|Renfo)(?:\s*\([^)]*\))?)\s*(?:\*\*)?\s*[:：]/gi;
+  const sessions = [];
+  let sm;
+  while((sm = sessionRegex.exec(normalized))){
+    sessions.push({ title: sm[1].trim(), start: sm.index, bodyStart: sessionRegex.lastIndex });
+  }
+  return { normalized, sessions };
+}
+
+function formatStructuredRawPlan(text, planId){
+  const source = normalizeRawPlanSource(text);
   const weekRegex = /(?:^|\n)\s*(?:#{1,3}\s*)?(?:\*\*)?\s*Semaine\s+(\d+[^\n:]*)\s*(?:\*\*)?/gi;
   const weeks = [];
   let match;
@@ -910,23 +930,18 @@ function formatStructuredRawPlan(text, planId){
   const weekHtml = weeks.map((week, idx) => {
     const nextStart = weeks[idx + 1]?.start ?? source.length;
     const body = source.slice(week.bodyStart, nextStart).trim();
-    const sessionRegex = /(?:^|\n|\.\s+)\s*(?:\*\*)?\s*((?:Séance\s+\d+|Renforcement|Renfo)(?:\s*\([^)]*\))?)\s*(?:\*\*)?\s*:/gi;
-    const sessions = [];
-    let sm;
-    while((sm = sessionRegex.exec(body))){
-      sessions.push({ title: sm[1].trim(), start: sm.index, bodyStart: sessionRegex.lastIndex });
-    }
+    const { normalized, sessions } = splitRawPlanSessions(body);
     if(!sessions.length){
       return `<section class="raw-week">
         <div class="raw-week-head"><div class="raw-week-title">Semaine ${escapeHtml(week.label)}</div></div>
-        <div class="raw-session-body">${inlinePlanHtml(body)}</div>
+        <div class="raw-week-fallback">${inlinePlanHtml(body)}</div>
       </section>`;
     }
 
-    const weekNote = body.slice(0, sessions[0].start).trim().replace(/^\.+\s*/, '');
+    const weekNote = normalized.slice(0, sessions[0].start).trim().replace(/^\.+\s*/, '');
     const sessionsHtml = sessions.map((s, sidx) => {
-      const nextSessionStart = sessions[sidx + 1]?.start ?? body.length;
-      const sessionBody = body.slice(s.bodyStart, nextSessionStart).trim().replace(/^\s*[:.-]\s*/, '');
+      const nextSessionStart = sessions[sidx + 1]?.start ?? normalized.length;
+      const sessionBody = normalized.slice(s.bodyStart, nextSessionStart).trim().replace(/^\s*[:.-]\s*/, '');
       const meta = sessionMetaFromTitle(s.title);
       const cleanTitle = s.title.replace(/^Renfo\b/i, 'Renforcement');
       const chips = [
