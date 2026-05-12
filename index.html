@@ -1179,6 +1179,93 @@ Types possibles: Endurance fondamentale|Sortie longue|Back to back|Seuil|Tempo|V
 Chaque semaine doit contenir exactement ${dpw} séances. Chaque séance doit avoir au minimum jour,type,objectif,duree,distance_km,denivele_m,intensite,zone,allure,rpe,recuperation,description,echauffement,corps,retour_calme,technique,nutrition,conseil.`;
   }
 
+  function mkFullPlanPrompt(){
+    return `Tu es ChatGPT coach trail. Crée le plan complet en une seule réponse, comme si l'utilisateur te le demandait directement dans ChatGPT.
+
+Contexte:
+- Athlète: ${profile.name}
+- Course: ${race}
+- Date: ${date}
+- Distance/D+: ${dist||'?'} km / ${elev||'?'} m+
+- Temps avant course: ${weeks} semaines
+- Niveau indiqué: ${level}
+- Disponibilité: ${dpw} séances par semaine
+- Objectif et infos utilisateur: ${goal || 'finisher, plan réaliste'}
+- Historique récent connu: ${recent.map(s=>`${s.date} ${s.type} ${s.km||'?'}km ${s.elev||0}m+ ${s.dur||''} ${s.notes||''}`).join(' | ') || 'aucun'}
+
+Ce que je veux:
+- Un plan comme un coach humain, PAS un tableau automatique.
+- Priorité absolue: DURÉE + D+ + contenu spécifique de séance.
+- La distance est secondaire: mets distance_km à 0 sauf si une distance est vraiment évidente et cohérente.
+- Pour les sorties longues, écris surtout "2h30 trail, 800-1200D+" par exemple.
+- Chaque semaine doit avoir une vraie logique: charge progressive, semaine allégée, spécifique, affûtage.
+- Chaque séance doit ressembler à ça:
+  "1h10 total: 20min EF + 8x2min montée soutenue récup descente + 15min retour calme"
+  "1h15 trail facile vallonné + 6x20s rapides en côte"
+  "2h30 trail, 800-1200D+, tester nutrition, rester facile"
+  "Renfo 30min: squats, fentes arrière, gainage, mollets, équilibre 1 jambe"
+- Pas de km absurdes, pas d'allures de champion, pas de 30km en 1h35.
+- Si ${dpw} séances ne permet pas d'ajouter le renfo comme séance séparée, mets le renfo dans conseil ou description d'une séance facile.
+- Écris en français, simple, précis, exploitable.
+
+Structure attendue si course longue/ultra proche de 8-10 semaines:
+- 6 semaines de charge progressive
+- 1-2 semaines spécifiques
+- 1 semaine allégée / course
+- Séance 1 qualité/côtes
+- Séance 2 endurance vallonnée/technique
+- Séance 3 sortie longue trail
+- Renfo court si possible
+
+Renvoie UNIQUEMENT un JSON valide:
+{
+  "resume":"résumé coach en 3-5 phrases, avec la stratégie globale",
+  "phases":[{"nom":"Charge progressive","semaines":"1-6","objectif":"..."},{"nom":"Spécifique","semaines":"7-8","objectif":"..."},{"nom":"Affûtage","semaines":"9","objectif":"..."}],
+  "semaines":[
+    {
+      "numero":1,
+      "phase":"Charge progressive",
+      "volume_km":0,
+      "denivele_m":1200,
+      "charge":"modérée",
+      "focus":"Endurance spécifique trail + côtes",
+      "objectif":"objectif de la semaine",
+      "logique":"pourquoi cette semaine est construite comme ça",
+      "seances":[
+        {
+          "jour":"Mar",
+          "type":"Côtes",
+          "objectif":"puissance montée + cardio",
+          "duree":"1h10",
+          "distance_km":0,
+          "denivele_m":300,
+          "intensite":"soutenu contrôlé",
+          "zone":"Z3-Z4",
+          "allure":"à l'effort, pas à l'allure",
+          "rpe":"7/10",
+          "recuperation":"24-36h facile ensuite",
+          "description":"20min EF + 8x2min montée soutenue récup descente + 15min retour calme",
+          "echauffement":"20min EF + mobilité chevilles/hanches",
+          "corps":"8x2min montée soutenue, récupération en descente",
+          "retour_calme":"15min facile",
+          "technique":"petits pas, buste haut, mains actives",
+          "nutrition":"eau; glucides si chaleur",
+          "conseil":"réussie si la dernière répétition reste propre"
+        }
+      ]
+    }
+  ]
+}
+
+Contraintes JSON:
+- Génère exactement ${weeks} semaines.
+- Chaque semaine contient exactement ${dpw} séances.
+- Chaque séance a toutes les clés de l'exemple.
+- distance_km peut rester 0, c'est même préférable si la distance n'est pas nécessaire.
+- denivele_m peut être une estimation simple.
+- Aucun texte hors JSON.`;
+  }
+
   function extract(raw){
     if(!raw) return null;
     const cleaned = raw
@@ -1191,7 +1278,7 @@ Chaque semaine doit contenir exactement ${dpw} séances. Chaque séance doit avo
   }
 
   async function getJsonPart(prompt, label){
-    const raw = await claude([{role:'user', content: prompt}], SYS, 6000);
+    const raw = await claude([{role:'user', content: prompt}], SYS, 18000);
     let data = extract(raw);
     if(data?.semaines?.length) return data;
 
@@ -1199,7 +1286,7 @@ Chaque semaine doit contenir exactement ${dpw} séances. Chaque séance doit avo
     const repaired = await claude([{
       role:'user',
       content: `La réponse suivante n'est pas un JSON exploitable pour TrailMate. Renvoie UNIQUEMENT un JSON valide avec une clé "semaines" non vide, sans markdown, sans commentaire.\n\nRéponse à corriger:\n${raw || '(vide)'}\n\nDemande originale:\n${prompt}`
-    }], SYS, 6000);
+    }], SYS, 18000);
     data = extract(repaired);
     if(data?.semaines?.length) return data;
 
@@ -1310,36 +1397,19 @@ Chaque semaine doit contenir exactement ${dpw} séances. Chaque séance doit avo
   }
 
   try{
-    const planData = { resume:`Plan ${weeks} semaines pour ${race}.`, phases:[], semaines:[] };
-    let usedFallback = false;
-    const chunkSize = 1;
-    for(let from=1; from<=weeks; from+=chunkSize){
-      const to = Math.min(weeks, from + chunkSize - 1);
-      msgEl.textContent = `Génération experte de la semaine ${from}/${weeks}…`;
-      const part = normalizePlanPart(await getJsonPart(mkPrompt(from, to, from === 1), `semaines ${from}-${to}`), from, to);
-      if(part?.semaines?.length){
-        if(from === 1){
-          planData.resume = part.resume || planData.resume;
-          planData.phases = part.phases || planData.phases;
-        }
-        part.semaines.forEach(w => {
-          if(isWeakWeek(w)){
-            usedFallback = true;
-            planData.semaines.push(buildFallbackWeeks(w.numero, w.numero)[0]);
-          } else {
-            planData.semaines.push(w);
-          }
-        });
-      } else {
-        usedFallback = true;
-        planData.semaines.push(...buildFallbackWeeks(from, to));
-      }
-    }
+    msgEl.textContent = `Génération du plan complet avec ChatGPT…`;
+    const rawPlan = await getJsonPart(mkFullPlanPrompt(), 'plan complet ChatGPT');
+    const normalized = normalizePlanPart(rawPlan, 1, weeks);
+    const planData = {
+      resume: rawPlan?.resume || `Plan ${weeks} semaines pour ${race}.`,
+      phases: rawPlan?.phases || [],
+      semaines: normalized?.semaines || []
+    };
     msgEl.textContent = 'Assemblage du plan…';
 
-    if(!planData.semaines.length) throw new Error('Plan IA invalide — plan de secours créé');
+    if(!planData.semaines.length) throw new Error('Plan ChatGPT invalide');
 
-    DB.plans.push({ id:Date.now(), name, race, date, dist, elev, level, dpw, goal, data:planData, createdAt:new Date().toISOString(), partialFallback:usedFallback });
+    DB.plans.push({ id:Date.now(), name, race, date, dist, elev, level, dpw, goal, data:planData, createdAt:new Date().toISOString(), provider:'openai' });
     save('plans');
     renderAll();
     closeModal('modal-plan');
@@ -1348,15 +1418,10 @@ Chaque semaine doit contenir exactement ${dpw} séances. Chaque séance doit avo
     btn.disabled = false;
     go('plans');
   } catch(e){
-    msgEl.textContent = 'IA instable, création d’un plan de secours…';
-    const planData = fallbackPlan();
-    DB.plans.push({ id:Date.now(), name, race, date, dist, elev, level, dpw, goal, data:planData, createdAt:new Date().toISOString(), fallback:true });
-    save('plans');
-    renderAll();
-    closeModal('modal-plan');
+    msgEl.textContent = 'Erreur ChatGPT : ' + e.message;
+    alert('Impossible de générer le plan avec ChatGPT : '+e.message);
     genBox.style.display = 'none';
     btn.disabled = false;
-    go('plans');
   }
 }
 
