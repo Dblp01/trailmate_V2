@@ -246,12 +246,18 @@ select.fi{cursor:pointer}
 .raw-week-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap}
 .raw-week-title{font-family:'Syne',sans-serif;font-size:18px;color:var(--g);font-weight:800}
 .raw-week-note{font-size:12px;color:var(--text3);line-height:1.6;margin-bottom:10px}
-.raw-session{background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:12px;margin:10px 0}
-.raw-session-top{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;margin-bottom:8px}
+.raw-session{background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:12px;margin:10px 0;cursor:pointer;transition:border-color .15s,background .15s}
+.raw-session:hover{border-color:rgba(169,238,91,.35);background:rgba(169,238,91,.035)}
+.raw-session.open{border-color:var(--gbr);background:linear-gradient(135deg,var(--gb),var(--bg3))}
+.raw-session-top{display:flex;gap:10px;align-items:flex-start;justify-content:space-between}
 .raw-session-title{font-size:14px;color:var(--text);font-weight:800;line-height:1.35}
 .raw-session-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
 .raw-chip{font-size:11px;color:var(--g);background:var(--gb);border:1px solid var(--gbr);border-radius:999px;padding:3px 8px;font-weight:700}
-.raw-session-body{font-size:13px;line-height:1.7;color:var(--text2)}
+.raw-session-actions{display:flex;gap:7px;align-items:center;flex-shrink:0}
+.raw-open{width:28px;height:28px;border-radius:50%;border:1px solid var(--border);display:grid;place-items:center;color:var(--text3);font-size:14px;transition:transform .15s}
+.raw-session.open .raw-open{transform:rotate(90deg);color:var(--g);border-color:var(--gbr)}
+.raw-session-body{display:none;font-size:13px;line-height:1.7;color:var(--text2);margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
+.raw-session.open .raw-session-body{display:block}
 .raw-follow{margin-top:14px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:14px}
 .raw-follow h3{font-family:'Syne',sans-serif;font-size:16px;margin-bottom:10px}
 .raw-follow-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
@@ -852,7 +858,11 @@ function sessionMetaFromTitle(title){
 }
 
 function formatStructuredRawPlan(text, planId){
-  const source = String(text || '').replace(/\r/g, '').replace(/^\s*---+\s*$/gm, '').trim();
+  const source = String(text || '')
+    .replace(/\r/g, '')
+    .replace(/\*\*((?:Séance\s+\d+|Renforcement|Renfo)[^*]+)\*\*\s*:/gi, '$1:')
+    .replace(/^\s*---+\s*$/gm, '')
+    .trim();
   const weekRegex = /(?:^|\n)\s*(?:#{1,3}\s*)?(?:\*\*)?\s*Semaine\s+(\d+[^\n:]*)\s*(?:\*\*)?/gi;
   const weeks = [];
   let match;
@@ -865,11 +875,11 @@ function formatStructuredRawPlan(text, planId){
   const weekHtml = weeks.map((week, idx) => {
     const nextStart = weeks[idx + 1]?.start ?? source.length;
     const body = source.slice(week.bodyStart, nextStart).trim();
-    const sessionRegex = /(?:^|\n|\.\s+)\s*(?:\*\*)?\s*((?:Séance\s+\d+|Renforcement|Renfo)(?:\s*\([^)]*\))?\s*:)\s*(?:\*\*)?/gi;
+    const sessionRegex = /(?:^|\n|\.\s+)\s*(?:\*\*)?\s*((?:Séance\s+\d+|Renforcement|Renfo)(?:\s*\([^)]*\))?)\s*(?:\*\*)?\s*:/gi;
     const sessions = [];
     let sm;
     while((sm = sessionRegex.exec(body))){
-      sessions.push({ title: sm[1].replace(/:$/,'').trim(), start: sm.index, bodyStart: sessionRegex.lastIndex });
+      sessions.push({ title: sm[1].trim(), start: sm.index, bodyStart: sessionRegex.lastIndex });
     }
     if(!sessions.length){
       return `<section class="raw-week">
@@ -888,13 +898,18 @@ function formatStructuredRawPlan(text, planId){
         meta.duration ? `<span class="raw-chip">${escapeHtml(meta.duration)}</span>` : '',
         meta.elev ? `<span class="raw-chip">${escapeHtml(meta.elev)} m+</span>` : ''
       ].join('');
-      return `<article class="raw-session">
+      const open = idx === 0 && sidx === 0 ? ' open' : '';
+      const detailId = `raw-session-${planId || 'x'}-${idx}-${sidx}`;
+      return `<article class="raw-session${open}" id="${detailId}" onclick="toggleRawSession('${detailId}')">
         <div class="raw-session-top">
           <div>
             <div class="raw-session-title">${escapeHtml(cleanTitle)}</div>
             ${chips ? `<div class="raw-session-meta">${chips}</div>` : ''}
           </div>
-          ${planId ? `<button class="btn btn-g btn-sm" onclick="prefillRawPlanLog(${planId},'${encodeURIComponent(week.label)}','${encodeURIComponent(cleanTitle)}','${encodeURIComponent(meta.duration || '')}','${encodeURIComponent(meta.elev || '')}')">Suivre</button>` : ''}
+          <div class="raw-session-actions">
+            ${planId ? `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();prefillRawPlanLog(${planId},'${encodeURIComponent(week.label)}','${encodeURIComponent(cleanTitle)}','${encodeURIComponent(meta.duration || '')}','${encodeURIComponent(meta.elev || '')}')">Suivre</button>` : ''}
+            <span class="raw-open">›</span>
+          </div>
         </div>
         <div class="raw-session-body">${inlinePlanHtml(sessionBody)}</div>
       </article>`;
@@ -1774,6 +1789,10 @@ function sessionSteps(s){
 
 function toggleSessionDetails(id){
   document.getElementById(id)?.classList.toggle('on');
+}
+
+function toggleRawSession(id){
+  document.getElementById(id)?.classList.toggle('open');
 }
 
 function togglePlanSession(planId, weekIndex, sessionIndex){
