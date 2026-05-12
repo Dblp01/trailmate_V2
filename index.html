@@ -1205,6 +1205,7 @@ Ce que je veux:
   "2h30 trail, 800-1200D+, tester nutrition, rester facile"
   "Renfo 30min: squats, fentes arrière, gainage, mollets, équilibre 1 jambe"
 - Pas de km absurdes, pas d'allures de champion, pas de 30km en 1h35.
+- Ne mets jamais "repos" comme séance. Les ${dpw} séances doivent être des entraînements réels: course, trail, renfo, mobilité active courte.
 - Si ${dpw} séances ne permet pas d'ajouter le renfo comme séance séparée, mets le renfo dans conseil ou description d'une séance facile.
 - Écris en français, simple, précis, exploitable.
 
@@ -1259,7 +1260,7 @@ Renvoie UNIQUEMENT un JSON valide:
 
 Contraintes JSON:
 - Génère exactement ${weeks} semaines.
-- Chaque semaine contient exactement ${dpw} séances.
+- Chaque semaine contient exactement ${dpw} séances d'entraînement. Pas de séance "repos".
 - Chaque séance a toutes les clés de l'exemple.
 - distance_km peut rester 0, c'est même préférable si la distance n'est pas nécessaire.
 - denivele_m peut être une estimation simple.
@@ -1297,6 +1298,7 @@ Contraintes JSON:
   function normalizePlanPart(data, from, to){
     if(!data?.semaines?.length) return null;
     data.semaines = data.semaines
+      .map((w, idx) => ({ ...w, numero: Number(w.numero || w.semaine || w.week || (idx + 1)) }))
       .filter(w => Number(w.numero) >= from && Number(w.numero) <= to)
       .map(w => {
         const target = weekTargets(Number(w.numero)||from);
@@ -1330,7 +1332,7 @@ Contraintes JSON:
         const runElev = seances.reduce((a,s)=>a+(Number(s.denivele_m)||0),0);
         return {
           numero: Number(w.numero),
-          phase: w.phase || target.phase,
+          phase: w.phase || w.bloc || target.phase,
           volume_km: Math.max(0, Math.round(runKm || Number(w.volume_km) || 0)),
           denivele_m: Math.max(0, Math.round(runElev || Number(w.denivele_m) || target.weekElev)),
           focus: w.focus || target.focus,
