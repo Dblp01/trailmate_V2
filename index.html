@@ -865,7 +865,7 @@ function formatStructuredRawPlan(text, planId){
   const weekHtml = weeks.map((week, idx) => {
     const nextStart = weeks[idx + 1]?.start ?? source.length;
     const body = source.slice(week.bodyStart, nextStart).trim();
-    const sessionRegex = /(?:^|\n|\.\s+)\s*((?:Séance\s+\d+|Renforcement|Renfo)(?:\s*\([^)]*\))?\s*:)/gi;
+    const sessionRegex = /(?:^|\n|\.\s+)\s*(?:\*\*)?\s*((?:Séance\s+\d+|Renforcement|Renfo)(?:\s*\([^)]*\))?\s*:)\s*(?:\*\*)?/gi;
     const sessions = [];
     let sm;
     while((sm = sessionRegex.exec(body))){
