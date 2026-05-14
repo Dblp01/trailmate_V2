@@ -967,23 +967,33 @@ function rawSessionSubTitle(title, body){
 
 function workoutKind(text){
   const t = String(text || '').toLowerCase();
-  if(t.includes('récup') || t.includes('recup') || t.includes('retour') || t.includes('facile')) return 'recovery';
   if(t.includes('renfo') || t.includes('gainage') || t.includes('squat') || t.includes('fente')) return 'strength';
   if(t.includes('seuil') || t.includes('soutenu') || t.includes('rapide') || t.includes('côte') || t.includes('montée') || /\d+\s*x/i.test(t)) return 'hard';
+  if(t.includes('récup') || t.includes('recup') || t.includes('retour') || t.includes('facile')) return 'recovery';
   return 'easy';
 }
 
 function splitWorkoutBlocks(body){
   const clean = String(body || '').replace(/\*\*/g, '').replace(/\s+/g, ' ').trim();
   if(!clean) return [];
-  let chunks = clean
-    .replace(/\s*\+\s*/g, ' | ')
+
+  const hasNamedPhases = /échauffement|retour au calme|corps de séance|bloc principal|récupération\s*:/i.test(clean);
+  const separators = (clean.match(/\s+\+\s+|;|\s+puis\s+/gi) || []).length;
+  if(!hasNamedPhases && separators < 2) return [];
+
+  // Only split on explicit separators. Keep trail D+ values like "300m+" intact.
+  const chunks = clean
+    .replace(/\s+\+\s+/g, ' | ')
     .replace(/\s*;\s*/g, ' | ')
-    .split(/\s\|\s|(?:\.\s+)/)
+    .replace(/\s+puis\s+/gi, ' | ')
+    .split(/\s\|\s/)
     .map(x => x.trim().replace(/^[:,-]\s*/, ''))
     .filter(Boolean);
-  if(chunks.length <= 1 && clean.includes(',')) chunks = clean.split(/,\s+/).map(x => x.trim()).filter(Boolean);
-  if(chunks.length <= 1) chunks = [clean];
+  if(chunks.length < 2) return [];
+  const hasActionableBlocks = chunks.some(x => workoutKind(x) === 'hard' || workoutKind(x) === 'strength')
+    && chunks.every(x => x.length > 8);
+  if(!hasNamedPhases && !hasActionableBlocks) return [];
+
   return chunks.slice(0, 7).map((text, idx) => {
     const kind = workoutKind(text);
     const label = kind === 'hard' ? 'Bloc de travail' : kind === 'recovery' ? 'Récupération' : kind === 'strength' ? 'Renforcement' : idx === 0 ? 'Échauffement' : 'Endurance';
