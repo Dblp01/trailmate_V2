@@ -1578,6 +1578,104 @@ Semaine X
 Réponse courte mais exploitable, en français.`;
   }
 
+  function mkStructuredChunkPrompt(from, to){
+    return `Tu es ChatGPT coach expert trail/ultra-trail. Génère un plan structuré JSON pour les semaines ${from} à ${to}.
+
+Contexte:
+- Athlète: ${profile.name}
+- Course: ${race}
+- Date: ${date}
+- Objectif: ${dist || '?'} km / ${elev || '?'} m+
+- Plan total: ${weeks} semaines
+- Niveau: ${level}
+- Disponibilité: exactement ${dpw} séances/semaine
+- Infos utilisateur: ${goal || 'objectif finisher, plan progressif, éviter blessure'}
+- Historique récent: ${recent.map(s=>`${s.date} ${s.type} ${s.km||'?'}km ${s.elev||0}m+ ${s.dur||''}`).join(' | ') || 'aucun'}
+
+Règles coach:
+- Priorité durée + D+ + contenu précis. Distance secondaire: distance_km peut être 0.
+- Pas de volume absurde, pas d'allure de champion, pas d'augmentation brutale.
+- Chaque semaine: logique claire, charge progressive ou allégée si nécessaire.
+- Chaque séance: échauffement, corps de séance, retour au calme, conseil coach, nutrition si utile.
+- Ne mets pas repos comme séance. Renforcement/mobilité autorisé comme séance.
+- Sortie longue en durée + D+ réaliste. Exemple: "2h30", 800-1200m+ selon niveau.
+
+Réponds UNIQUEMENT en JSON valide, sans markdown:
+{
+  "resume":"résumé court du bloc ${from}-${to}",
+  "phases":[{"nom":"Bloc","semaines":"${from}-${to}","objectif":"objectif du bloc"}],
+  "semaines":[
+    {
+      "numero":${from},
+      "phase":"Base|Développement|Spécifique trail|Récupération|Affûtage",
+      "volume_km":0,
+      "denivele_m":800,
+      "charge":"modérée",
+      "focus":"focus physiologique",
+      "objectif":"objectif semaine",
+      "logique":"pourquoi cette semaine est construite ainsi",
+      "seances":[
+        {
+          "jour":"Mar",
+          "type":"Côtes longues",
+          "objectif":"puissance montée + endurance musculaire",
+          "duree":"1h10",
+          "distance_km":0,
+          "denivele_m":300,
+          "intensite":"soutenu contrôlé",
+          "zone":"Z3-Z4",
+          "allure":"à l'effort, pas à l'allure route",
+          "rpe":"7/10",
+          "recuperation":"24-36h facile ensuite",
+          "description":"20min EF + 8x2min montée soutenue récup descente + 15min retour calme",
+          "echauffement":"20min EF + mobilité chevilles/hanches",
+          "corps":"8x2min montée soutenue, récupération en descente",
+          "retour_calme":"15min facile",
+          "technique":"buste haut, petits pas, appuis propres",
+          "nutrition":"eau; glucides si chaleur ou >75min",
+          "conseil":"réussie si la dernière répétition reste propre"
+        }
+      ]
+    }
+  ]
+}
+
+Contraintes strictes:
+- semaines doit contenir toutes les semaines de ${from} à ${to}.
+- chaque semaine contient exactement ${dpw} séances.
+- garde les textes courts mais concrets.
+- aucun texte hors JSON.`;
+  }
+
+  async function generateStructuredPlanInChunks(){
+    const semaines = [];
+    const phases = [];
+    const resumes = [];
+    for(let from = 1; from <= weeks; from += 2){
+      const to = Math.min(weeks, from + 1);
+      msgEl.textContent = `Structuration IA semaines ${from}-${to}…`;
+      const data = await getJsonPart(mkStructuredChunkPrompt(from, to), `semaines ${from}-${to}`, 3600, 'gpt-4.1-mini');
+      const normalized = normalizePlanPart(data, from, to);
+      const got = new Set((normalized?.semaines || []).map(w => Number(w.numero)));
+      for(let i=from;i<=to;i++){
+        const week = (normalized?.semaines || []).find(w => Number(w.numero) === i);
+        if(week && !isWeakWeek(week)) semaines.push(week);
+        else semaines.push(buildFallbackWeeks(i, i)[0]);
+        got.add(i);
+      }
+      if(data?.resume) resumes.push(data.resume);
+      if(data?.phases?.length) phases.push(...data.phases);
+    }
+    return {
+      resume: resumes.join(' ') || `Plan structuré ${weeks} semaines pour ${race}: progression trail en durées, D+, séances détaillées, récupération et affûtage.`,
+      phases: phases.length ? phases : [
+        { nom:'Construction', semaines:`1-${Math.max(1,weeks-2)}`, objectif:'Construire endurance, D+ et force utile progressivement' },
+        { nom:'Affûtage', semaines:`${Math.max(1,weeks-1)}-${weeks}`, objectif:'Arriver frais le jour J' }
+      ],
+      semaines: semaines.sort((a,b) => Number(a.numero)-Number(b.numero))
+    };
+  }
+
   async function generatePlanInChunks(){
     const parts = [];
     parts.push(`Plan ${race} - ${dist || '?'} km / ${elev || '?'} m+\n\nStructure: ${dpw} séances/semaine, priorité aux durées, D+, progressivité, nutrition et fraîcheur.\n`);
@@ -1728,28 +1826,29 @@ Réponse courte mais exploitable, en français.`;
   }
 
   try{
-    msgEl.textContent = `Génération du plan avec ChatGPT…`;
-    let rawText = '';
+    msgEl.textContent = `Génération structurée du plan avec ChatGPT…`;
+    let planData = null;
     try{
-      rawText = await generatePlanInChunks();
+      planData = await generateStructuredPlanInChunks();
     } catch(firstError){
-      console.warn('Premier essai ChatGPT échoué', firstError);
-      msgEl.textContent = `ChatGPT a répondu avec une erreur, essai compact…`;
-      rawText = await claude([{role:'user', content: mkCompactRawPlanPrompt()}], 'Tu es ChatGPT coach trail. Réponds en français avec un plan clair, sans JSON.', 2600, 'gpt-4.1-mini');
+      console.warn('Génération structurée échouée, fallback texte', firstError);
+      msgEl.textContent = `Structuration IA échouée, génération texte de secours…`;
+      const rawText = await generatePlanInChunks();
+      planData = {
+        rawText,
+        resume: `Plan généré par ChatGPT en durées + D+, sans distances imposées.`,
+        phases: [],
+        semaines: []
+      };
     }
-    if(!rawText || rawText.trim().length < 220){
+    if(!planData?.semaines?.length && (!planData?.rawText || planData.rawText.trim().length < 220)){
       msgEl.textContent = `Réponse trop courte, relance compacte…`;
-      rawText = await claude([{role:'user', content: mkCompactRawPlanPrompt()}], 'Tu es ChatGPT coach trail. Réponds en français avec un plan clair, sans JSON.', 2600, 'gpt-4.1-mini');
+      const rawText = await claude([{role:'user', content: mkCompactRawPlanPrompt()}], 'Tu es ChatGPT coach trail. Réponds en français avec un plan clair, sans JSON.', 2600, 'gpt-4.1-mini');
+      planData = { rawText, resume: `Plan généré par ChatGPT en durées + D+.`, phases: [], semaines: [] };
     }
-    const planData = {
-      rawText,
-      resume: `Plan généré par ChatGPT en durées + D+, sans distances imposées.`,
-      phases: [],
-      semaines: []
-    };
-    if(!rawText || rawText.trim().length < 220) throw new Error('Réponse ChatGPT trop courte après deux essais');
+    if(!planData?.semaines?.length && (!planData?.rawText || planData.rawText.trim().length < 220)) throw new Error('Réponse ChatGPT trop courte après deux essais');
 
-    const newPlan = { id:Date.now(), name, race, date, dist, elev, level, dpw, goal, data:planData, createdAt:new Date().toISOString(), provider:'openai' };
+    const newPlan = { id:Date.now(), name, race, date, dist, elev, level, dpw, goal, data:planData, createdAt:new Date().toISOString(), provider:'openai-structured' };
     DB.plans.push(newPlan);
     save('plans');
     renderAll();
