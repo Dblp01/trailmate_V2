@@ -275,6 +275,9 @@ select.fi{cursor:pointer}
 .today-body{font-size:14px;line-height:1.75;color:var(--text2);background:var(--bg2);border:1px solid var(--border);border-radius:var(--rs);padding:14px}
 .today-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
 .today-note{margin-top:10px}
+.adapt-card{background:var(--ab);border:1px solid rgba(245,200,66,.25);border-radius:var(--r);padding:13px;margin-bottom:12px;color:var(--text2);font-size:13px;line-height:1.65}
+.adapt-card strong{color:var(--amber)}
+.adapt-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 
 /* STRAVA */
 .strava-connect-box{background:var(--stravab);border:1px solid rgba(252,76,2,.22);border-radius:var(--r);padding:20px;text-align:center;margin-bottom:16px}
@@ -1826,6 +1829,39 @@ function getTodayPlanSession(){
   return items.find(item => !planSessionDone(plan, item)) || items[0] || null;
 }
 
+function latestAdaptation(plan){
+  const a = plan?.data?.adaptation;
+  if(!a || a.dismissed) return null;
+  const ageHours = (Date.now() - new Date(a.createdAt || 0).getTime()) / 36e5;
+  return ageHours <= 96 ? a : null;
+}
+
+function createAdaptation(plan, status, note, item){
+  if(!plan?.data || !['Trop dur','Ratée','Douleur / alerte'].includes(status)) return;
+  const hard = status === 'Trop dur';
+  plan.data.adaptation = {
+    createdAt: new Date().toISOString(),
+    status,
+    source: item?.title || 'Séance du jour',
+    note: note || '',
+    title: hard ? 'Séance trop dure: prochaine séance allégée' : 'Séance ratée: reprise progressive',
+    advice: hard
+      ? 'Réduis la prochaine séance de 25 à 35%, reste en aisance respiratoire, supprime les blocs intenses si les jambes sont lourdes.'
+      : 'Ne compense pas la séance ratée. Reprends avec une séance facile, puis reviens au plan si les sensations sont bonnes.',
+    nextAction: hard
+      ? 'Objectif prochain entraînement: finir frais, RPE 3-4/10, aucune douleur.'
+      : 'Objectif prochain entraînement: retrouver du rythme sans ajouter de volume.'
+  };
+}
+
+function dismissAdaptation(planId){
+  const p = DB.plans.find(x => x.id === planId);
+  if(!p?.data?.adaptation) return;
+  p.data.adaptation.dismissed = true;
+  save('plans');
+  renderToday();
+}
+
 function renderToday(){
   const el = document.getElementById('today-content');
   if(!el) return;
@@ -1835,6 +1871,7 @@ function renderToday(){
     el.innerHTML = `<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><h3>Aucune séance prévue</h3><p>Crée un plan IA pour afficher ta prochaine séance ici.</p><button class="btn btn-p btn-sm" onclick="openModal('modal-plan')">Créer un plan</button></div>`;
     return;
   }
+  const adaptation = latestAdaptation(plan);
   el.innerHTML = `<div class="today-hero">
     <div class="today-kicker">${escapeHtml(plan.name || 'Plan actif')} · Semaine ${escapeHtml(item.weekLabel || item.week || '?')}</div>
     <div class="today-title">${escapeHtml(item.title || 'Séance')}</div>
@@ -1843,6 +1880,12 @@ function renderToday(){
       ${item.elev ? `<span class="raw-chip">${escapeHtml(item.elev)} m+</span>` : ''}
       <span class="raw-chip">Prochaine séance</span>
     </div>
+    ${adaptation ? `<div class="adapt-card">
+      <strong>${escapeHtml(adaptation.title)}</strong><br>
+      ${escapeHtml(adaptation.advice)}<br>
+      <span style="color:var(--text3)">${escapeHtml(adaptation.nextAction)}</span>
+      <div class="adapt-actions"><button class="btn btn-g btn-sm" onclick="dismissAdaptation(${plan.id})">OK, compris</button></div>
+    </div>` : ''}
     <div class="today-body">${inlinePlanHtml(item.body || 'Séance à réaliser en aisance, selon sensations.')}</div>
     <textarea class="fi today-note" id="today-note" placeholder="Ressenti après séance : jambes, souffle, douleur, météo, nutrition..."></textarea>
     <div class="today-actions">
@@ -1862,6 +1905,7 @@ function completeTodaySession(status){
   const item = getTodayPlanSession();
   if(!plan || !item) return;
   const note = document.getElementById('today-note')?.value || '';
+  const isCompleted = status !== 'Ratée';
   if(item.raw){
     plan.data.rawLogs = plan.data.rawLogs || [];
     plan.data.rawLogs.unshift({
@@ -1876,18 +1920,18 @@ function completeTodaySession(status){
       fatigue: status === 'Trop dur' ? 'Élevée' : 'Normale',
       notes: note
     });
-    if(status === 'Fait'){
-      DB.sessions.push({ id:Date.now()+1, plan_id:plan.id, type:item.title, date:tod(), km:0, dur:item.duration, elev:parseInt(item.elev)||0, hr:0, notes:note || item.body, feedback:'Séance du jour', source:'plan' });
+    if(isCompleted){
+      DB.sessions.push({ id:Date.now()+1, plan_id:plan.id, type:item.title, date:tod(), km:0, dur:item.duration, elev:parseInt(item.elev)||0, hr:0, notes:note || item.body, feedback:`Séance du jour · ${status}`, source:'plan' });
       save('sessions');
     }
   } else {
     const s = plan.data.semaines?.[item.weekIndex]?.seances?.[item.sessionIndex];
     if(s){
-      s.done = status === 'Fait';
+      s.done = isCompleted;
       s.doneAt = new Date().toISOString();
       s.feeling = status === 'Fait' ? 'Bien' : status;
       s.feedback = note;
-      if(status === 'Fait'){
+      if(isCompleted){
         DB.sessions.push({
           id: Date.now() + 1,
           plan_id: plan.id,
@@ -1898,13 +1942,14 @@ function completeTodaySession(status){
           elev: Number(s.denivele_m)||parseInt(item.elev)||0,
           hr: 0,
           notes: note || s.description || '',
-          feedback: s.conseil || 'Séance du jour',
+          feedback: `${s.conseil || 'Séance du jour'} · ${status}`,
           source: 'plan'
         });
         save('sessions');
       }
     }
   }
+  createAdaptation(plan, status, note, item);
   save('plans');
   renderAll();
   go('today');
@@ -1917,7 +1962,7 @@ function viewPlan(id){
   const d = p.data;
   if(d?.rawText){
     const logs = d.rawLogs || [];
-    const logHtml = logs.length ? logs.map((l,idx) => `<div class="raw-log ${l.status==='Fait'?'done':''}">
+    const logHtml = logs.length ? logs.map((l,idx) => `<div class="raw-log ${['Fait','Trop dur'].includes(l.status)?'done':''}">
       <div class="raw-log-top">
         <div class="raw-log-title">Semaine ${l.week || '?'} · ${escapeHtml(l.name || 'Séance')}</div>
         <button class="btn btn-d btn-sm" onclick="deleteRawPlanLog(${id},${idx})">Supprimer</button>
@@ -1940,7 +1985,7 @@ function viewPlan(id){
         <div class="raw-follow-grid">
           <div><label class="fl">Semaine</label><input class="fi" id="raw-week-${id}" type="number" min="1" placeholder="1"></div>
           <div><label class="fl">Séance</label><input class="fi" id="raw-name-${id}" placeholder="Côtes / Sortie longue"></div>
-          <div><label class="fl">Statut</label><select class="fi" id="raw-status-${id}"><option>Fait</option><option>À faire</option><option>Modifiée</option><option>Ratée</option></select></div>
+          <div><label class="fl">Statut</label><select class="fi" id="raw-status-${id}"><option>Fait</option><option>Trop dur</option><option>À faire</option><option>Modifiée</option><option>Ratée</option></select></div>
           <div><label class="fl">Date</label><input class="fi" id="raw-date-${id}" type="date" value="${tod()}"></div>
           <div><label class="fl">Durée réalisée</label><input class="fi" id="raw-duration-${id}" placeholder="1h20"></div>
           <div><label class="fl">D+ réalisé</label><input class="fi" id="raw-elev-${id}" type="number" placeholder="650"></div>
@@ -2157,7 +2202,7 @@ function addRawPlanLog(planId){
   };
   p.data.rawLogs = p.data.rawLogs || [];
   p.data.rawLogs.unshift(log);
-  if(log.status === 'Fait'){
+  if(['Fait','Trop dur'].includes(log.status)){
     DB.sessions.push({
       id: Date.now() + 1,
       plan_id: planId,
@@ -2168,7 +2213,7 @@ function addRawPlanLog(planId){
       elev: parseInt(log.elev)||0,
       hr: 0,
       notes: log.notes,
-      feedback: `Ressenti: ${log.feeling || '-'} · Fatigue: ${log.fatigue || '-'}`,
+      feedback: `${log.status} · Ressenti: ${log.feeling || '-'} · Fatigue: ${log.fatigue || '-'}`,
       source: 'plan'
     });
     save('sessions');
