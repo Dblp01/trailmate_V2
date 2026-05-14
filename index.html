@@ -268,6 +268,13 @@ select.fi{cursor:pointer}
 .raw-log-top{display:flex;align-items:center;gap:8px;justify-content:space-between;flex-wrap:wrap;margin-bottom:6px}
 .raw-log-title{font-size:13px;font-weight:700;color:var(--text)}
 .raw-log-meta{font-size:11px;color:var(--text3);display:flex;gap:8px;flex-wrap:wrap}
+.today-hero{background:linear-gradient(135deg,var(--gb),var(--bg2));border:1px solid var(--gbr);border-radius:var(--r);padding:18px;margin-bottom:14px}
+.today-kicker{font-size:10px;color:var(--g);text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin-bottom:8px}
+.today-title{font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:var(--text);line-height:1.15}
+.today-meta{display:flex;gap:7px;flex-wrap:wrap;margin:12px 0}
+.today-body{font-size:14px;line-height:1.75;color:var(--text2);background:var(--bg2);border:1px solid var(--border);border-radius:var(--rs);padding:14px}
+.today-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.today-note{margin-top:10px}
 
 /* STRAVA */
 .strava-connect-box{background:var(--stravab);border:1px solid rgba(252,76,2,.22);border-radius:var(--r);padding:20px;text-align:center;margin-bottom:16px}
@@ -333,6 +340,8 @@ select.fi{cursor:pointer}
   .raw-session{padding:11px;margin:9px 0}
   .raw-session-title{font-size:13px}
   .raw-follow-grid{grid-template-columns:1fr}
+  .today-actions{grid-template-columns:1fr}
+  .today-title{font-size:20px}
   .modal-footer{position:sticky;bottom:-18px;background:var(--bg2);padding-top:12px;flex-wrap:wrap}
   .modal-footer .btn{flex:1;justify-content:center}
   .pw-hd{align-items:flex-start}
@@ -378,6 +387,7 @@ select.fi{cursor:pointer}
     <nav class="nav">
       <div class="nsep">Entraînement</div>
       <div class="ni on" onclick="go('dashboard')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Tableau de bord</div>
+      <div class="ni" onclick="go('today')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Séance du jour</div>
       <div class="ni" onclick="go('plans')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Plans IA</div>
       <div class="ni" onclick="go('sessions')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>Mes séances</div>
       <div class="ni" onclick="go('coach')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>Coach IA</div>
@@ -451,6 +461,18 @@ select.fi{cursor:pointer}
           <div id="dash-brief-content"></div>
         </div>
       </div>
+    </div>
+
+    <!-- TODAY -->
+    <div id="p-today" class="page">
+      <div class="topbar">
+        <div class="tb-left"><h1>Séance du jour</h1><p>La prochaine séance utile du plan actif</p></div>
+        <div class="tb-right">
+          <button class="btn btn-g btn-sm" onclick="renderToday()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>Actualiser</button>
+          <button class="btn btn-p btn-sm" onclick="go('plans')">Plans</button>
+        </div>
+      </div>
+      <div style="padding:22px" id="today-content"></div>
     </div>
 
     <!-- PLANS -->
@@ -760,7 +782,7 @@ function showApp(){
   renderAll();
 }
 
-function renderAll(){ renderDash(); renderPlans(); renderSessions(); renderRaces(); }
+function renderAll(){ renderDash(); renderToday(); renderPlans(); renderSessions(); renderRaces(); }
 
 function emptyCloudData(){
   return { version:1, updatedAt:new Date().toISOString(), profiles:{ dimitri:{plans:[],sessions:[],races:[],briefs:[]}, lonny:{plans:[],sessions:[],races:[],briefs:[]} } };
@@ -1014,6 +1036,7 @@ function go(id){
   const nav = [...document.querySelectorAll('.ni')].find(n => n.getAttribute('onclick')?.includes("'"+id+"'"));
   if(nav) nav.classList.add('on');
   if(id === 'dashboard') renderDash();
+  if(id === 'today')     renderToday();
   if(id === 'strava')    renderStravaPage();
 }
 
@@ -1745,6 +1768,146 @@ function deletePlan(id){
   if(!confirm('Supprimer ce plan ?')) return;
   DB.plans = DB.plans.filter(p => p.id !== id);
   save('plans'); renderPlans(); renderDash();
+}
+
+function rawPlanItems(plan){
+  const text = plan?.data?.rawText;
+  if(!text) return [];
+  const source = normalizeRawPlanSource(text);
+  const weekRegex = /(?:^|\n)\s*(?:#{1,3}\s*)?(?:\*\*)?\s*Semaine\s+(\d+[^\n:]*)\s*(?:\*\*)?/gi;
+  const weeks = [];
+  let match;
+  while((match = weekRegex.exec(source))){
+    weeks.push({ label: match[1].trim(), start: match.index, bodyStart: weekRegex.lastIndex });
+  }
+  return weeks.flatMap((week, wi) => {
+    const nextStart = weeks[wi + 1]?.start ?? source.length;
+    const body = source.slice(week.bodyStart, nextStart).trim();
+    const { normalized, sessions } = splitRawPlanSessions(body);
+    return sessions.map((s, si) => {
+      const nextSessionStart = sessions[si + 1]?.start ?? normalized.length;
+      const sessionBody = normalized.slice(s.bodyStart, nextSessionStart).trim().replace(/^\s*[:.-]\s*/, '');
+      const title = s.title.replace(/^Renfo\b/i, 'Renforcement');
+      const meta = sessionMetaFromTitle(title + ' ' + sessionBody);
+      const weekNum = (week.label.match(/\d+/)||[''])[0];
+      return { planId:plan.id, week:weekNum, weekLabel:week.label, index:si+1, title, body:sessionBody, duration:meta.duration||'', elev:meta.elev||'', raw:true };
+    });
+  });
+}
+
+function structuredPlanItems(plan){
+  return (plan?.data?.semaines || []).flatMap((w, wi) => (w.seances || []).map((s, si) => ({
+    planId: plan.id,
+    week: w.numero || wi + 1,
+    weekLabel: String(w.numero || wi + 1),
+    index: si + 1,
+    title: `${s.jour || ''} · ${s.type || 'Séance'}`.replace(/^ · /,''),
+    body: [s.objectif, s.description, s.conseil].filter(Boolean).join('\n\n'),
+    duration: s.duree || '',
+    elev: s.denivele_m ? String(s.denivele_m) : '',
+    raw:false,
+    weekIndex: wi,
+    sessionIndex: si,
+    session: s
+  })));
+}
+
+function planSessionDone(plan, item){
+  if(item.raw){
+    return (plan.data.rawLogs || []).some(l => String(l.week || '') === String(item.week || '') && String(l.name || '') === String(item.title || '') && ['Fait','Ratée','Trop dur','Modifiée'].includes(l.status));
+  }
+  return !!item.session?.done;
+}
+
+function getTodayPlanSession(){
+  const plan = DB.plans[DB.plans.length - 1];
+  if(!plan) return null;
+  const items = plan.data?.rawText ? rawPlanItems(plan) : structuredPlanItems(plan);
+  return items.find(item => !planSessionDone(plan, item)) || items[0] || null;
+}
+
+function renderToday(){
+  const el = document.getElementById('today-content');
+  if(!el) return;
+  const plan = DB.plans[DB.plans.length - 1];
+  const item = getTodayPlanSession();
+  if(!plan || !item){
+    el.innerHTML = `<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><h3>Aucune séance prévue</h3><p>Crée un plan IA pour afficher ta prochaine séance ici.</p><button class="btn btn-p btn-sm" onclick="openModal('modal-plan')">Créer un plan</button></div>`;
+    return;
+  }
+  el.innerHTML = `<div class="today-hero">
+    <div class="today-kicker">${escapeHtml(plan.name || 'Plan actif')} · Semaine ${escapeHtml(item.weekLabel || item.week || '?')}</div>
+    <div class="today-title">${escapeHtml(item.title || 'Séance')}</div>
+    <div class="today-meta">
+      ${item.duration ? `<span class="raw-chip">${escapeHtml(item.duration)}</span>` : ''}
+      ${item.elev ? `<span class="raw-chip">${escapeHtml(item.elev)} m+</span>` : ''}
+      <span class="raw-chip">Prochaine séance</span>
+    </div>
+    <div class="today-body">${inlinePlanHtml(item.body || 'Séance à réaliser en aisance, selon sensations.')}</div>
+    <textarea class="fi today-note" id="today-note" placeholder="Ressenti après séance : jambes, souffle, douleur, météo, nutrition..."></textarea>
+    <div class="today-actions">
+      <button class="btn btn-p" onclick="completeTodaySession('Fait')">Fait</button>
+      <button class="btn btn-g" onclick="completeTodaySession('Trop dur')">Trop dur</button>
+      <button class="btn btn-d" onclick="completeTodaySession('Ratée')">Ratée</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="ch"><div class="ct">Plan actif</div><button class="btn btn-g btn-sm" onclick="viewPlan(${plan.id})">Voir tout le plan</button></div>
+    <div style="font-size:13px;color:var(--text2);line-height:1.6">Cette page affiche automatiquement la prochaine séance non suivie du dernier plan créé.</div>
+  </div>`;
+}
+
+function completeTodaySession(status){
+  const plan = DB.plans[DB.plans.length - 1];
+  const item = getTodayPlanSession();
+  if(!plan || !item) return;
+  const note = document.getElementById('today-note')?.value || '';
+  if(item.raw){
+    plan.data.rawLogs = plan.data.rawLogs || [];
+    plan.data.rawLogs.unshift({
+      id: Date.now(),
+      week: item.week,
+      name: item.title,
+      status,
+      date: tod(),
+      duration: item.duration,
+      elev: item.elev,
+      feeling: status === 'Fait' ? 'Bien' : status,
+      fatigue: status === 'Trop dur' ? 'Élevée' : 'Normale',
+      notes: note
+    });
+    if(status === 'Fait'){
+      DB.sessions.push({ id:Date.now()+1, plan_id:plan.id, type:item.title, date:tod(), km:0, dur:item.duration, elev:parseInt(item.elev)||0, hr:0, notes:note || item.body, feedback:'Séance du jour', source:'plan' });
+      save('sessions');
+    }
+  } else {
+    const s = plan.data.semaines?.[item.weekIndex]?.seances?.[item.sessionIndex];
+    if(s){
+      s.done = status === 'Fait';
+      s.doneAt = new Date().toISOString();
+      s.feeling = status === 'Fait' ? 'Bien' : status;
+      s.feedback = note;
+      if(status === 'Fait'){
+        DB.sessions.push({
+          id: Date.now() + 1,
+          plan_id: plan.id,
+          type: s.type || item.title || 'Séance planifiée',
+          date: tod(),
+          km: Number(s.distance_km)||0,
+          dur: s.duree || item.duration || '',
+          elev: Number(s.denivele_m)||parseInt(item.elev)||0,
+          hr: 0,
+          notes: note || s.description || '',
+          feedback: s.conseil || 'Séance du jour',
+          source: 'plan'
+        });
+        save('sessions');
+      }
+    }
+  }
+  save('plans');
+  renderAll();
+  go('today');
 }
 
 function viewPlan(id){
