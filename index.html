@@ -259,10 +259,23 @@ select.fi{cursor:pointer}
 .raw-session-actions{display:flex;gap:7px;align-items:center;flex-shrink:0}
 .raw-open{width:28px;height:28px;border-radius:50%;border:1px solid var(--border);display:grid;place-items:center;color:var(--text3);font-size:14px;transition:transform .15s}
 .raw-session.open .raw-open{transform:rotate(90deg);color:var(--g);border-color:var(--gbr)}
-.raw-session-body{display:none;font-size:13px;line-height:1.7;color:var(--text2);margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
+.raw-session-body{display:none;font-size:13px;line-height:1.7;color:var(--text2);margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
 .raw-session.open .raw-session-body{display:block}
 .raw-session-preview{font-size:12px;color:var(--text2);line-height:1.55;margin-top:8px}
 .raw-session.open .raw-session-preview{display:none}
+.workout-strip{display:flex;gap:4px;height:34px;align-items:end;margin-bottom:12px;padding:8px 0 4px}
+.workout-seg{border-radius:8px;min-width:22px;flex:1;border:1px solid rgba(255,255,255,.08)}
+.workout-seg.easy{height:18px;background:rgba(218,255,72,.88)}
+.workout-seg.hard{height:31px;background:rgba(133,28,10,.95)}
+.workout-seg.recovery{height:20px;background:rgba(255,153,196,.85)}
+.workout-seg.strength{height:25px;background:rgba(110,181,255,.65)}
+.workout-blocks{display:grid;gap:9px}
+.workout-block{display:grid;grid-template-columns:5px 1fr;gap:12px;background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:12px;padding:12px}
+.workout-bar{border-radius:20px;background:var(--g)}
+.workout-bar.easy{background:#dfff42}.workout-bar.hard{background:#8a1e0b}.workout-bar.recovery{background:#ff9bc6}.workout-bar.strength{background:#6eb5ff}
+.workout-label{font-size:12px;color:var(--text3);font-weight:800;margin-bottom:3px}
+.workout-text{font-size:14px;color:var(--text);font-weight:700;line-height:1.45}
+.workout-detail{font-size:12px;color:var(--text3);line-height:1.55;margin-top:4px}
 .raw-week-fallback{display:block;font-size:13px;line-height:1.7;color:var(--text2);margin-top:8px}
 .raw-follow{margin-top:14px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:14px}
 .raw-follow h3{font-family:'Syne',sans-serif;font-size:16px;margin-bottom:10px}
@@ -952,6 +965,46 @@ function rawSessionSubTitle(title, body){
   return 'Séance structurée du plan';
 }
 
+function workoutKind(text){
+  const t = String(text || '').toLowerCase();
+  if(t.includes('récup') || t.includes('recup') || t.includes('retour') || t.includes('facile')) return 'recovery';
+  if(t.includes('renfo') || t.includes('gainage') || t.includes('squat') || t.includes('fente')) return 'strength';
+  if(t.includes('seuil') || t.includes('soutenu') || t.includes('rapide') || t.includes('côte') || t.includes('montée') || /\d+\s*x/i.test(t)) return 'hard';
+  return 'easy';
+}
+
+function splitWorkoutBlocks(body){
+  const clean = String(body || '').replace(/\*\*/g, '').replace(/\s+/g, ' ').trim();
+  if(!clean) return [];
+  let chunks = clean
+    .replace(/\s*\+\s*/g, ' | ')
+    .replace(/\s*;\s*/g, ' | ')
+    .split(/\s\|\s|(?:\.\s+)/)
+    .map(x => x.trim().replace(/^[:,-]\s*/, ''))
+    .filter(Boolean);
+  if(chunks.length <= 1 && clean.includes(',')) chunks = clean.split(/,\s+/).map(x => x.trim()).filter(Boolean);
+  if(chunks.length <= 1) chunks = [clean];
+  return chunks.slice(0, 7).map((text, idx) => {
+    const kind = workoutKind(text);
+    const label = kind === 'hard' ? 'Bloc de travail' : kind === 'recovery' ? 'Récupération' : kind === 'strength' ? 'Renforcement' : idx === 0 ? 'Échauffement' : 'Endurance';
+    return { text, kind, label };
+  });
+}
+
+function workoutBlocksHtml(body){
+  const blocks = splitWorkoutBlocks(body);
+  if(!blocks.length) return '';
+  const strip = blocks.map(b => `<span class="workout-seg ${b.kind}"></span>`).join('');
+  const cards = blocks.map(b => `<div class="workout-block">
+    <div class="workout-bar ${b.kind}"></div>
+    <div>
+      <div class="workout-label">${escapeHtml(b.label)}</div>
+      <div class="workout-text">${escapeHtml(b.text)}</div>
+    </div>
+  </div>`).join('');
+  return `<div class="workout-strip">${strip}</div><div class="workout-blocks">${cards}</div>`;
+}
+
 function normalizeRawPlanSource(text){
   return String(text || '')
     .replace(/\r/g, '')
@@ -1043,7 +1096,7 @@ function formatStructuredRawPlan(text, planId){
             <span class="raw-open">›</span>
           </div>
         </div>
-        <div class="raw-session-body">${inlinePlanHtml(sessionBody)}</div>
+        <div class="raw-session-body">${workoutBlocksHtml(sessionBody) || inlinePlanHtml(sessionBody)}</div>
       </article>`;
     }).join('');
 
