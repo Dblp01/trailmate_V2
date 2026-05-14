@@ -1523,6 +1523,53 @@ Ne donne pas de distances. Sorties longues en durée + D+ uniquement.
 Plan adapté au niveau actuel, progressif, sans volumes absurdes, sans JSON, sans tableau.`;
   }
 
+  function mkChunkRawPlanPrompt(from, to){
+    return `Tu es ChatGPT, coach expert trail et ultra-trail. Génère uniquement les semaines ${from} à ${to} d'un plan d'entraînement.
+
+Contexte global:
+- Course: ${race}
+- Date: ${date}
+- Objectif: ${dist || '?'} km / ${elev || '?'} m+
+- Plan total: ${weeks} semaines
+- Niveau: ${level}
+- Disponibilité: ${dpw} séances/semaine
+- Infos utilisateur: ${goal || 'objectif finisher, plan progressif, éviter blessure'}
+- Historique récent: ${recent.map(s=>`${s.date} ${s.type} ${s.km||'?'}km ${s.elev||0}m+ ${s.dur||''}`).join(' | ') || 'aucun'}
+
+Contraintes importantes:
+- Réponds uniquement avec Semaine ${from} à Semaine ${to}, pas d'introduction longue.
+- Ne mets pas de distances, uniquement durée + D+ approximatif.
+- Chaque semaine doit contenir ${dpw} séances utiles maximum.
+- Format obligatoire:
+Semaine X
+1. Mardi - durée, D+ : contenu précis, objectif, intensité.
+2. Jeudi - durée, D+ : contenu précis, objectif, intensité.
+3. Samedi/Dimanche - durée, D+ : sortie longue ou spécifique.
+4. Renforcement - 25-35 min : contenu précis.
+- Progression réaliste: pas de volume absurde, pas de séance de champion du monde, pas d'augmentation brutale.
+- Si semaine allégée ou affûtage, baisse clairement durée et D+.
+
+Réponse courte mais exploitable, en français.`;
+  }
+
+  async function generatePlanInChunks(){
+    const parts = [];
+    parts.push(`Plan ${race} - ${dist || '?'} km / ${elev || '?'} m+\n\nStructure: ${dpw} séances/semaine, priorité aux durées, D+, progressivité, nutrition et fraîcheur.\n`);
+    for(let from = 1; from <= weeks; from += 2){
+      const to = Math.min(weeks, from + 1);
+      msgEl.textContent = `Génération ChatGPT semaines ${from}-${to}…`;
+      const part = await claude(
+        [{role:'user', content: mkChunkRawPlanPrompt(from, to)}],
+        'Tu es ChatGPT coach trail. Réponds en français avec un plan clair, court, sans JSON.',
+        1800,
+        'gpt-4.1-mini'
+      );
+      if(!part || part.trim().length < 120) throw new Error(`Réponse trop courte semaines ${from}-${to}`);
+      parts.push(part.trim());
+    }
+    return parts.join('\n\n');
+  }
+
   function extract(raw){
     if(!raw) return null;
     const cleaned = raw
@@ -1655,18 +1702,18 @@ Plan adapté au niveau actuel, progressif, sans volumes absurdes, sans JSON, san
   }
 
   try{
-    msgEl.textContent = `Génération du plan complet avec ChatGPT…`;
+    msgEl.textContent = `Génération du plan avec ChatGPT…`;
     let rawText = '';
     try{
-      rawText = await claude([{role:'user', content: mkRawPlanPrompt()}], 'Tu es ChatGPT coach trail. Réponds en français avec un plan clair, sans JSON.', 7000, 'gpt-4.1-mini');
+      rawText = await generatePlanInChunks();
     } catch(firstError){
       console.warn('Premier essai ChatGPT échoué', firstError);
-      msgEl.textContent = `ChatGPT a répondu avec une erreur, deuxième essai plus léger…`;
-      rawText = await claude([{role:'user', content: mkCompactRawPlanPrompt()}], 'Tu es ChatGPT coach trail. Réponds en français avec un plan clair, sans JSON.', 5500, 'gpt-4.1-mini');
+      msgEl.textContent = `ChatGPT a répondu avec une erreur, essai compact…`;
+      rawText = await claude([{role:'user', content: mkCompactRawPlanPrompt()}], 'Tu es ChatGPT coach trail. Réponds en français avec un plan clair, sans JSON.', 2600, 'gpt-4.1-mini');
     }
     if(!rawText || rawText.trim().length < 220){
       msgEl.textContent = `Réponse trop courte, relance compacte…`;
-      rawText = await claude([{role:'user', content: mkCompactRawPlanPrompt()}], 'Tu es ChatGPT coach trail. Réponds en français avec un plan clair, sans JSON.', 5500, 'gpt-4.1-mini');
+      rawText = await claude([{role:'user', content: mkCompactRawPlanPrompt()}], 'Tu es ChatGPT coach trail. Réponds en français avec un plan clair, sans JSON.', 2600, 'gpt-4.1-mini');
     }
     const planData = {
       rawText,
