@@ -727,11 +727,14 @@ let serverConfig = { hasOpenAI:false, hasAnthropic:false, aiProvider:'', stravaC
 let cloudData = null;
 let cloudTimer = null;
 let cloudStatus = 'local';
-const CLOUD_SYNC_ORIGIN = (location.hostname === '127.0.0.1' || location.hostname === 'localhost')
-  ? 'https://trailmate-v2.netlify.app'
+let lastCloudRefresh = 0;
+const NETLIFY_ORIGIN = 'https://trailmate-v2.netlify.app';
+const CLOUD_SYNC_ORIGIN = (location.protocol === 'file:' || location.hostname === '127.0.0.1' || location.hostname === 'localhost')
+  ? NETLIFY_ORIGIN
   : '';
 
 function storageKey(k){ return `tm_${activeProfile}_${k}`; }
+function netlifyUrl(path){ return `${CLOUD_SYNC_ORIGIN}${path}`; }
 function readJson(k, fallback){
   try{ return JSON.parse(localStorage.getItem(storageKey(k)) || JSON.stringify(fallback)); }
   catch(e){ return fallback; }
@@ -795,6 +798,10 @@ window.onload = async () => {
     this.style.height = '40px';
     this.style.height = Math.min(this.scrollHeight, 110) + 'px';
   });
+  window.addEventListener('focus', refreshCloudFromOtherDevice);
+  document.addEventListener('visibilitychange', () => {
+    if(!document.hidden) refreshCloudFromOtherDevice();
+  });
 
   // Check Strava OAuth callback
   const params = new URLSearchParams(window.location.search);
@@ -824,7 +831,7 @@ function registerPwa(){
 
 async function loadServerConfig(){
   try{
-    const res = await fetch('/.netlify/functions/config');
+    const res = await fetch(netlifyUrl('/.netlify/functions/config'));
     if(res.ok) serverConfig = await res.json();
   } catch(e){}
 }
@@ -846,7 +853,7 @@ function emptyCloudData(){
 }
 
 function cloudDataUrl(){
-  return `${CLOUD_SYNC_ORIGIN}/.netlify/functions/data`;
+  return netlifyUrl('/.netlify/functions/data');
 }
 
 function profileSnapshot(id){
@@ -889,6 +896,7 @@ function mergeProfileData(local={}, remote={}){
 
 async function loadCloudData(){
   try{
+    lastCloudRefresh = Date.now();
     const res = await fetch(cloudDataUrl());
     if(!res.ok) throw new Error('cloud '+res.status);
     cloudData = await res.json();
@@ -909,6 +917,14 @@ async function loadCloudData(){
     cloudStatus = 'local';
     renderProfileUI();
   }
+}
+
+async function refreshCloudFromOtherDevice(){
+  if(Date.now() - lastCloudRefresh < 5000) return;
+  await loadCloudData();
+  renderAll();
+  renderChat();
+  updateStravaUI();
 }
 
 function scheduleCloudSave(){
@@ -1205,7 +1221,7 @@ function fillStravaConfigModal(){
 // IA API
 // ═══════════════════════════════════════════
 async function claude(messages, sys, maxTok, model='gpt-4.1-mini'){
-  const res = await fetch('/.netlify/functions/claude', {
+  const res = await fetch(netlifyUrl('/.netlify/functions/claude'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -2843,7 +2859,7 @@ async function sendChat(){
   chatHistory.push({ role:'user', content:msg });
   saveChat();
   try{
-    const res = await fetch('/.netlify/functions/claude', {
+    const res = await fetch(netlifyUrl('/.netlify/functions/claude'), {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify({ model:'gpt-4.1-mini', max_tokens:1500, system:getSys(), messages:chatHistory })
@@ -2933,7 +2949,7 @@ async function exchangeStravaCode(code){
   const { clientId, clientSecret } = getStravaConfig();
   if(!clientId){ document.getElementById('setup').style.display = 'none'; document.getElementById('app').style.display = 'flex'; renderAll(); return; }
   try{
-    const res = await fetch('/.netlify/functions/strava-token', {
+    const res = await fetch(netlifyUrl('/.netlify/functions/strava-token'), {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify({ client_id:clientId, client_secret:clientSecret, code, grant_type:'authorization_code' })
