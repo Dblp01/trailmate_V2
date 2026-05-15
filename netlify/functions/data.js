@@ -22,16 +22,26 @@ const emptyData = () => ({
 
 function blobStoreOptions() {
   const siteID = process.env.NETLIFY_SITE_ID || process.env.SITE_ID;
-  const token = process.env.NETLIFY_AUTH_TOKEN;
+  const token = process.env.NETLIFY_AUTH_TOKEN || process.env.NETLIFY_BLOBS_TOKEN;
   return siteID && token ? { siteID, token } : undefined;
 }
 
 function blobStoreError(action, error) {
   const missing = [];
   if (!(process.env.NETLIFY_SITE_ID || process.env.SITE_ID)) missing.push('NETLIFY_SITE_ID');
-  if (!process.env.NETLIFY_AUTH_TOKEN) missing.push('NETLIFY_AUTH_TOKEN');
+  if (!(process.env.NETLIFY_AUTH_TOKEN || process.env.NETLIFY_BLOBS_TOKEN)) missing.push('NETLIFY_AUTH_TOKEN');
   const hint = missing.length ? ` Variables Netlify manquantes: ${missing.join(', ')}.` : '';
   return new Error(`Netlify Blobs ${action} failed: ${error.message}.${hint}`);
+}
+
+function openBlobStore(getStore) {
+  const options = blobStoreOptions();
+  if (!options) return getStore('trailmate');
+  try {
+    return getStore('trailmate', options);
+  } catch (e) {
+    return getStore({ name: 'trailmate', ...options });
+  }
 }
 
 function isServerlessRuntime() {
@@ -67,8 +77,7 @@ exports.handler = async (event) => {
 async function readData() {
   try {
     const { getStore } = await import('@netlify/blobs');
-    const options = blobStoreOptions();
-    const store = options ? getStore('trailmate', options) : getStore('trailmate');
+    const store = openBlobStore(getStore);
     const value = await store.get(BLOB_KEY, { type: 'json', consistency: 'strong' });
     return normalize(value || emptyData());
   } catch (e) {
@@ -81,8 +90,7 @@ async function readData() {
 async function writeData(data) {
   try {
     const { getStore } = await import('@netlify/blobs');
-    const options = blobStoreOptions();
-    const store = options ? getStore('trailmate', options) : getStore('trailmate');
+    const store = openBlobStore(getStore);
     await store.setJSON(BLOB_KEY, data, { consistency: 'strong' });
   } catch (e) {
     if (isServerlessRuntime()) throw blobStoreError('write', e);
