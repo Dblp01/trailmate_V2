@@ -80,6 +80,7 @@ button,input,select,textarea{font-family:'DM Sans',sans-serif}
 .ath-name{font-size:12px;font-weight:500}
 .ath-st{font-size:10px;color:var(--text3)}
 .ath-st.live{color:var(--g)}
+.sync-btn{width:100%;justify-content:center;margin-top:8px;font-size:11px;padding:8px}
 .dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--g);margin-right:3px;animation:blink 2s infinite;vertical-align:middle}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
 
@@ -455,6 +456,7 @@ select.fi{cursor:pointer}
         <div class="av av-b">LO</div>
         <div><div class="ath-name">Lonny</div><div class="ath-st" id="ath-lonny-st">Trail partner</div></div>
       </button>
+      <button class="btn btn-g sync-btn" id="cloud-sync-btn" onclick="manualCloudSync()">Sync cloud</button>
     </div>
   </aside>
 
@@ -928,6 +930,20 @@ async function refreshCloudFromOtherDevice(){
   renderChat();
   updateStravaUI();
 }
+async function manualCloudSync(){
+  const btn = document.getElementById('cloud-sync-btn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Sync...'; }
+  await saveCloudNow();
+  await loadCloudData();
+  renderAll();
+  renderChat();
+  updateStravaUI();
+  if(btn){
+    btn.disabled = false;
+    btn.textContent = cloudStatus === 'sync' ? 'Cloud OK' : 'Cloud erreur';
+    setTimeout(() => { btn.textContent = 'Sync cloud'; }, 2200);
+  }
+}
 
 function scheduleCloudSave(){
   if(!cloudData) return;
@@ -970,6 +986,8 @@ function renderProfileUI(){
     title.textContent = cloudStatus === 'sync' ? 'Équipe · Cloud' : 'Équipe · Local';
     title.title = cloudError || '';
   }
+  const syncBtn = document.getElementById('cloud-sync-btn');
+  if(syncBtn) syncBtn.textContent = cloudStatus === 'sync' ? 'Cloud OK' : 'Sync cloud';
 }
 
 function escapeHtml(str){
