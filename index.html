@@ -115,6 +115,26 @@ button,input,select,textarea{font-family:'DM Sans',sans-serif}
 .ch{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
 .ct{font-family:'Syne',sans-serif;font-size:11px;font-weight:600;color:var(--text3);letter-spacing:.08em;text-transform:uppercase;display:flex;align-items:center;gap:5px}
 .ct svg{width:12px;height:12px}
+.coach-flow{background:linear-gradient(135deg,rgba(168,224,99,.12),rgba(110,181,255,.04));border-color:var(--gbr)}
+.flow-grid{display:grid;grid-template-columns:1.1fr 1fr;gap:12px}
+.flow-main{display:grid;gap:10px}
+.flow-status{display:flex;gap:8px;flex-wrap:wrap}
+.flow-pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border2);background:rgba(255,255,255,.025);border-radius:20px;padding:5px 9px;font-size:11px;color:var(--text2)}
+.flow-pill.good{color:var(--g);background:var(--gb);border-color:var(--gbr)}
+.flow-pill.warn{color:var(--amber);background:var(--ab);border-color:rgba(245,200,66,.24)}
+.flow-pill.hot{color:var(--red);background:var(--rb);border-color:rgba(255,107,107,.24)}
+.flow-next{border:1px solid var(--border);background:rgba(13,15,14,.48);border-radius:var(--r);padding:13px}
+.flow-next-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;margin-bottom:5px}
+.flow-next-meta{display:flex;gap:6px;flex-wrap:wrap;margin:9px 0}
+.flow-copy{font-size:13px;color:var(--text2);line-height:1.65}
+.flow-side{display:grid;gap:8px}
+.flow-step{display:grid;grid-template-columns:24px 1fr;gap:9px;align-items:start;padding:9px;border:1px solid var(--border);border-radius:var(--rs);background:rgba(255,255,255,.02)}
+.flow-dot{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--bg4);color:var(--text3);font-size:11px;font-weight:700}
+.flow-dot.on{background:var(--g);color:#0d1a00}
+.flow-dot.warn{background:var(--amber);color:#251b00}
+.flow-step-title{font-size:12px;font-weight:700;color:var(--text)}
+.flow-step-text{font-size:11px;color:var(--text3);line-height:1.5;margin-top:1px}
+.flow-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 
 /* METRICS */
 .mg{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
@@ -365,6 +385,9 @@ select.fi{cursor:pointer}
   .page{padding:0}
   .page > .topbar + div{padding:14px!important}
   .mg,.g2,.fg2{grid-template-columns:1fr;gap:10px}
+  .flow-grid{grid-template-columns:1fr}
+  .flow-next-title{font-size:16px}
+  .flow-actions .btn{flex:1;justify-content:center}
   .mc{padding:11px 12px}
   .mv{font-size:19px}
   .card{padding:14px;margin-bottom:10px}
@@ -489,6 +512,10 @@ select.fi{cursor:pointer}
             <div class="cd-days" id="dash-days">—</div>
             <div style="font-size:11px;color:var(--text3);margin-top:3px">jours restants</div>
           </div>
+        </div>
+        <div class="card coach-flow" id="dash-flow-card" style="display:none">
+          <div class="ch"><div class="ct"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5"/><path d="M4 7h9l-1 4 1 4H4"/><path d="M18 8v8"/><path d="M15 13h6"/></svg>Fil coach</div><button class="btn btn-g btn-sm" onclick="renderDash()">Actualiser</button></div>
+          <div id="dash-flow-content"></div>
         </div>
         <div class="g2">
           <div class="card">
@@ -2833,6 +2860,8 @@ function renderDash(){
       <button class="btn btn-g btn-sm" style="margin-top:12px" onclick="viewPlan(${lp.id})">Voir le plan complet →</button>`;
   } else planCard.style.display = 'none';
 
+  renderCoachFlow();
+
   const briefCard = document.getElementById('dash-brief-card');
   const latestBrief = DB.briefs?.[DB.briefs.length-1];
   if(latestBrief){
@@ -2841,6 +2870,113 @@ function renderDash(){
       <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${new Date(latestBrief.createdAt).toLocaleString('fr')}</div>
       <div style="font-size:13px;color:var(--text2);line-height:1.7">${latestBrief.text.replace(/\n/g,'<br>')}</div>`;
   } else briefCard.style.display = 'none';
+}
+
+function planCompletionStats(plan){
+  const items = allPlanItems(plan);
+  const done = items.filter(item => planSessionDone(plan, item)).length;
+  const feedback = plan?.data?.rawText
+    ? (plan.data.rawLogs || []).filter(l => l.feeling || l.fatigue || l.notes).length
+    : items.filter(item => item.session?.feeling || item.session?.fatigue || item.session?.feedback).length;
+  return { total:items.length, done, feedback };
+}
+
+function latestLinkedActivity(){
+  return [...DB.sessions]
+    .filter(s => s.plan_match_key || s.plan_id)
+    .sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0))[0] || null;
+}
+
+function unlinkedStravaSessions(){
+  return DB.sessions
+    .filter(s => s.source === 'strava' && !s.plan_match_key)
+    .sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0));
+}
+
+function flowStepHtml(state, title, text){
+  const cls = state === 'ok' ? 'on' : state === 'warn' ? 'warn' : '';
+  const mark = state === 'ok' ? '✓' : state === 'warn' ? '!' : '•';
+  return `<div class="flow-step">
+    <div class="flow-dot ${cls}">${mark}</div>
+    <div><div class="flow-step-title">${escapeHtml(title)}</div><div class="flow-step-text">${escapeHtml(text)}</div></div>
+  </div>`;
+}
+
+function renderCoachFlow(){
+  const card = document.getElementById('dash-flow-card');
+  const el = document.getElementById('dash-flow-content');
+  if(!card || !el) return;
+  const plan = latestPlan();
+  if(!plan){
+    card.style.display = 'block';
+    el.innerHTML = `<div class="flow-grid">
+      <div class="flow-main">
+        <div class="flow-next">
+          <div class="flow-next-title">Pas encore de fil conducteur</div>
+          <div class="flow-copy">Crée un plan IA pour que TrailMate relie objectif, séances prévues, Strava, ressenti et adaptation.</div>
+          <div class="flow-actions"><button class="btn btn-p btn-sm" onclick="openModal('modal-plan')">Créer un plan</button></div>
+        </div>
+      </div>
+      <div class="flow-side">
+        ${flowStepHtml('todo','Plan','Aucun plan actif')}
+        ${flowStepHtml('todo','Séances','Aucune séance à relier')}
+        ${flowStepHtml('todo','Adaptation','En attente de données terrain')}
+      </div>
+    </div>`;
+    return;
+  }
+
+  const stats = planCompletionStats(plan);
+  const next = getTodayPlanSession();
+  const linked = latestLinkedActivity();
+  const unlinked = unlinkedStravaSessions();
+  const adaptation = latestAdaptation(plan);
+  const completion = stats.total ? Math.round((stats.done / stats.total) * 100) : 0;
+  const feedbackNeed = stats.done > stats.feedback;
+  const needsLink = unlinked.length > 0;
+  const flowState = adaptation ? 'hot' : needsLink || feedbackNeed ? 'warn' : 'good';
+  const stateLabel = adaptation ? 'Plan à adapter' : needsLink ? 'Strava à relier' : feedbackNeed ? 'Ressenti manquant' : 'Tout est connecté';
+  const stateText = adaptation
+    ? adaptation.nextAction
+    : needsLink
+      ? `${unlinked.length} activité${unlinked.length > 1 ? 's' : ''} Strava à associer au plan pour que le coach comprenne la charge réelle.`
+      : feedbackNeed
+        ? 'Certaines séances sont faites sans ressenti. Ajoute jambes, souffle, douleur ou fatigue pour rendre le suivi utile.'
+        : 'Plan, séances et retours sont cohérents. Tu peux suivre la prochaine séance.';
+
+  card.style.display = 'block';
+  el.innerHTML = `<div class="flow-grid">
+    <div class="flow-main">
+      <div class="flow-status">
+        <span class="flow-pill ${flowState}">${escapeHtml(stateLabel)}</span>
+        <span class="flow-pill good">${stats.done}/${stats.total || '?'} séances suivies</span>
+        <span class="flow-pill ${needsLink ? 'warn' : 'good'}">${unlinked.length} Strava non relié${unlinked.length > 1 ? 's' : ''}</span>
+        <span class="flow-pill ${feedbackNeed ? 'warn' : 'good'}">${stats.feedback} ressentis</span>
+      </div>
+      <div class="flow-next">
+        <div class="flow-next-title">${escapeHtml(next?.title || 'Prochaine décision coach')}</div>
+        <div class="flow-next-meta">
+          ${next?.weekLabel || next?.week ? `<span class="raw-chip">Semaine ${escapeHtml(next.weekLabel || next.week)}</span>` : ''}
+          ${next?.duration ? `<span class="raw-chip">${escapeHtml(next.duration)}</span>` : ''}
+          ${next?.elev ? `<span class="raw-chip">${escapeHtml(next.elev)} m+</span>` : ''}
+          <span class="raw-chip">${completion}% du plan suivi</span>
+        </div>
+        <div class="flow-copy">${escapeHtml(stateText)}</div>
+        <div class="flow-actions">
+          ${next ? `<button class="btn btn-p btn-sm" onclick="go('today')">Voir la séance du jour</button>` : ''}
+          <button class="btn btn-g btn-sm" onclick="viewPlan(${plan.id})">Ouvrir le plan</button>
+          ${needsLink ? `<button class="btn btn-g btn-sm" onclick="go('sessions')">Relier Strava</button>` : ''}
+          ${adaptation?.kind ? `<button class="btn btn-p btn-sm" onclick="applyAdaptation(${plan.id})">Appliquer adaptation</button>` : ''}
+        </div>
+      </div>
+    </div>
+    <div class="flow-side">
+      ${flowStepHtml('ok','Objectif', `${plan.race || plan.name} · ${plan.dist || '?'} km · ${plan.elev || '?'} m+`)}
+      ${flowStepHtml(stats.done ? 'ok' : 'warn','Séances faites', stats.done ? `${stats.done} séance${stats.done > 1 ? 's' : ''} reliée${stats.done > 1 ? 's' : ''} au plan` : 'Aucune séance du plan validée')}
+      ${flowStepHtml(linked ? 'ok' : needsLink ? 'warn' : 'todo','Terrain / Strava', linked ? `${linked.date || ''} · ${linked.notes || linked.type || 'activité reliée'}` : needsLink ? 'Activités à associer' : 'Aucune activité reliée')}
+      ${flowStepHtml(adaptation ? 'warn' : 'ok','Décision coach', adaptation ? adaptation.title : 'Pas d’alerte de charge')}
+    </div>
+  </div>`;
 }
 
 async function generateWeeklyBrief(){
