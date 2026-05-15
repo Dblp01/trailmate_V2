@@ -44,11 +44,12 @@ exports.handler = async (event) => {
 
 async function readData() {
   try {
-    const { getStore } = require('@netlify/blobs');
+    const { getStore } = await import('@netlify/blobs');
     const store = getStore('trailmate');
-    const value = await store.get(BLOB_KEY, { type: 'json' });
+    const value = await store.get(BLOB_KEY, { type: 'json', consistency: 'strong' });
     return normalize(value || emptyData());
   } catch (e) {
+    if (process.env.NETLIFY) throw new Error(`Netlify Blobs read failed: ${e.message}`);
     if (!fs.existsSync(LOCAL_FILE)) return emptyData();
     return normalize(JSON.parse(fs.readFileSync(LOCAL_FILE, 'utf8')));
   }
@@ -56,10 +57,11 @@ async function readData() {
 
 async function writeData(data) {
   try {
-    const { getStore } = require('@netlify/blobs');
+    const { getStore } = await import('@netlify/blobs');
     const store = getStore('trailmate');
-    await store.setJSON(BLOB_KEY, data);
+    await store.setJSON(BLOB_KEY, data, { consistency: 'strong' });
   } catch (e) {
+    if (process.env.NETLIFY) throw new Error(`Netlify Blobs write failed: ${e.message}`);
     fs.writeFileSync(LOCAL_FILE, JSON.stringify(data, null, 2));
   }
 }

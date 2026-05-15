@@ -727,6 +727,7 @@ let serverConfig = { hasOpenAI:false, hasAnthropic:false, aiProvider:'', stravaC
 let cloudData = null;
 let cloudTimer = null;
 let cloudStatus = 'local';
+let cloudError = '';
 let lastCloudRefresh = 0;
 const NETLIFY_ORIGIN = 'https://trailmate-v2.netlify.app';
 const CLOUD_SYNC_ORIGIN = (location.protocol === 'file:' || location.hostname === '127.0.0.1' || location.hostname === 'localhost')
@@ -915,6 +916,7 @@ async function loadCloudData(){
     await saveCloudNow();
   } catch(e){
     cloudStatus = 'local';
+    cloudError = e.message || 'cloud indisponible';
     renderProfileUI();
   }
 }
@@ -945,8 +947,10 @@ async function saveCloudNow(){
     });
     if(!res.ok) throw new Error('cloud '+res.status);
     cloudStatus = 'sync';
+    cloudError = '';
   } catch(e){
     cloudStatus = 'local';
+    cloudError = e.message || 'sauvegarde cloud impossible';
   }
   renderProfileUI();
 }
@@ -961,7 +965,11 @@ function renderProfileUI(){
   if(avEl) avEl.innerHTML = '<span id="av-me-txt">TO</span>';
   document.getElementById('ath-me-st').innerHTML = activeProfile === 'dimitri' ? '<span class="dot"></span>Actif' : 'Profil perso';
   document.getElementById('ath-lonny-st').innerHTML = activeProfile === 'lonny' ? '<span class="dot"></span>Actif' : 'Trail partner';
-  document.querySelector('.team-title').textContent = cloudStatus === 'sync' ? 'Équipe · Cloud' : 'Équipe · Local';
+  const title = document.querySelector('.team-title');
+  if(title){
+    title.textContent = cloudStatus === 'sync' ? 'Équipe · Cloud' : 'Équipe · Local';
+    title.title = cloudError || '';
+  }
 }
 
 function escapeHtml(str){
