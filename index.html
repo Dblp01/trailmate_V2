@@ -827,6 +827,50 @@ function loadProfile(){
   stravaToken = localStorage.getItem(storageKey('strava_token')) || '';
   stravaAthlete = readJson('strava_athlete', null);
 }
+
+function clonePlanTemplate(plan){
+  const copy = JSON.parse(JSON.stringify(plan || {}));
+  const sharedPlanId = copy.sharedPlanId || copy.id || Date.now();
+  copy.id = sharedPlanId;
+  copy.sharedPlanId = sharedPlanId;
+  copy.shared = true;
+  copy.copiedAt = copy.copiedAt || new Date().toISOString();
+  if(copy.data){
+    delete copy.data.adaptation;
+    if(Array.isArray(copy.data.rawLogs)) copy.data.rawLogs = [];
+    if(Array.isArray(copy.data.semaines)){
+      copy.data.semaines.forEach(w => (w.seances || []).forEach(s => {
+        ['done','doneAt','feeling','fatigue','feedback','adapted','adaptedAt','stravaSessionId'].forEach(k => delete s[k]);
+      }));
+    }
+  }
+  return copy;
+}
+
+function syncPlanTemplatesAcrossProfiles(){
+  const snapshots = Object.fromEntries(Object.keys(PROFILES).map(id => [id, profileSnapshot(id)]));
+  const templates = [];
+  Object.values(snapshots).forEach(data => (data.plans || []).forEach(plan => {
+    const key = String(plan.sharedPlanId || plan.id || '');
+    if(key && !templates.some(x => String(x.sharedPlanId || x.id) === key)) templates.push(clonePlanTemplate(plan));
+  }));
+  let changed = false;
+  for(const id of Object.keys(PROFILES)){
+    const data = snapshots[id];
+    data.plans = data.plans || [];
+    for(const plan of templates){
+      const key = String(plan.sharedPlanId || plan.id);
+      const exists = data.plans.some(p => String(p.sharedPlanId || p.id) === key);
+      if(!exists){
+        data.plans.push(clonePlanTemplate(plan));
+        changed = true;
+      }
+    }
+    if(changed) saveProfileSnapshot(id, data);
+  }
+  if(changed) scheduleCloudSave();
+}
+
 function switchProfile(id){
   if(!PROFILES[id] || id === activeProfile) return;
   activeProfile = id;
@@ -965,6 +1009,7 @@ async function loadCloudData(){
         cloudData.profiles[id] = merged;
       }
     }
+    syncPlanTemplatesAcrossProfiles();
     loadProfile();
     cloudStatus = 'sync';
     renderProfileUI();
@@ -2088,8 +2133,11 @@ Contraintes strictes:
     if(!planData?.semaines?.length && (!planData?.rawText || planData.rawText.trim().length < 220)) throw new Error('Réponse ChatGPT trop courte après deux essais');
 
     const newPlan = { id:Date.now(), name, race, date, dist, elev, level, dpw, goal, data:planData, createdAt:new Date().toISOString(), provider:'openai-structured' };
+    newPlan.sharedPlanId = newPlan.id;
+    newPlan.shared = true;
     DB.plans.push(newPlan);
     save('plans');
+    syncPlanTemplatesAcrossProfiles();
     renderAll();
     closeModal('modal-plan');
     ['p-name','p-race','p-date','p-dist','p-elev','p-goal'].forEach(id => document.getElementById(id).value = '');
