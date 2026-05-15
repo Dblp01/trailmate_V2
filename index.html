@@ -2096,6 +2096,78 @@ function createAdaptation(plan, status, note, item){
       : 'Objectif prochain entraînement: retrouver du rythme sans ajouter de volume.'
   };
 }
+function createStravaAdaptation(plan, verdict, activity, item){
+  if(!plan?.data || !verdict) return;
+  const hard = ['Plus dur que prévu','Intense'].includes(verdict.label);
+  const light = verdict.label === 'Plus léger que prévu';
+  if(!hard && !light) return;
+  plan.data.adaptation = {
+    createdAt: new Date().toISOString(),
+    status: verdict.label,
+    kind: hard ? 'lighten_next' : 'keep_plan',
+    source: activity?.notes || activity?.type || 'Activité Strava',
+    linkedSession: item?.title || '',
+    note: verdict.deltas || '',
+    title: hard ? 'Sortie Strava exigeante: prochaine séance à alléger' : 'Sortie plus légère: ne compense pas',
+    advice: hard
+      ? 'La charge réelle dépasse ce qui était prévu. Allège la prochaine séance pour absorber le travail et éviter une accumulation inutile.'
+      : 'La séance est faite mais plus légère. Le plus intelligent est de rester régulier, sans rajouter brutalement du volume.',
+    nextAction: hard
+      ? 'Action proposée: réduire la prochaine séance de 30%, supprimer les blocs intenses, garder RPE 3-4/10.'
+      : 'Action proposée: garder le plan et viser une séance propre à la prochaine sortie.'
+  };
+}
+function adaptationTargetItem(plan){
+  const items = allPlanItems(plan);
+  return items.find(item => !planSessionDone(plan, item)) || null;
+}
+function applyAdaptation(planId){
+  const plan = DB.plans.find(x => x.id === planId);
+  const adaptation = latestAdaptation(plan);
+  if(!plan || !adaptation) return;
+  const target = adaptationTargetItem(plan);
+  if(!target){
+    adaptation.dismissed = true;
+    save('plans');
+    renderToday();
+    return;
+  }
+  if(target.raw){
+    plan.data.rawLogs = plan.data.rawLogs || [];
+    plan.data.rawLogs.unshift({
+      week:target.week,
+      name:target.title,
+      status:'Modifiée',
+      date:tod(),
+      duration:target.duration || '',
+      elev:target.elev || '',
+      feeling:'Adaptée',
+      fatigue:adaptation.status === 'Plus dur que prévu' || adaptation.status === 'Intense' ? 'Élevée' : 'Normale',
+      notes:`Adaptation automatique: ${adaptation.nextAction}`,
+      adaptedFrom:adaptation.source
+    });
+  } else {
+    const s = plan.data?.semaines?.[target.weekIndex]?.seances?.[target.sessionIndex];
+    if(s){
+      s.adapted = true;
+      s.adaptedAt = new Date().toISOString();
+      s.originalType = s.originalType || s.type;
+      s.originalDescription = s.originalDescription || s.description;
+      s.type = adaptation.kind === 'lighten_next' ? 'Récupération active' : s.type;
+      s.intensite = adaptation.kind === 'lighten_next' ? 'Très facile, RPE 3-4/10' : s.intensite;
+      s.description = adaptation.kind === 'lighten_next'
+        ? `Séance allégée après ${adaptation.source}. Réduis la durée de 30%, reste en aisance respiratoire, supprime les blocs intenses. Objectif: assimiler.`
+        : `${s.description || ''}\nAdaptation: garder le plan, sans compensation.`;
+      s.conseil = adaptation.nextAction;
+      s.feedback = `Adaptée automatiquement après Strava: ${adaptation.status}`;
+    }
+  }
+  adaptation.applied = true;
+  adaptation.dismissed = true;
+  save('plans');
+  renderToday();
+  renderPlans();
+}
 
 function dismissAdaptation(planId){
   const p = DB.plans.find(x => x.id === planId);
@@ -2127,7 +2199,10 @@ function renderToday(){
       <strong>${escapeHtml(adaptation.title)}</strong><br>
       ${escapeHtml(adaptation.advice)}<br>
       <span style="color:var(--text3)">${escapeHtml(adaptation.nextAction)}</span>
-      <div class="adapt-actions"><button class="btn btn-g btn-sm" onclick="dismissAdaptation(${plan.id})">OK, compris</button></div>
+      <div class="adapt-actions">
+        ${adaptation.kind ? `<button class="btn btn-p btn-sm" onclick="applyAdaptation(${plan.id})">Appliquer</button>` : ''}
+        <button class="btn btn-g btn-sm" onclick="dismissAdaptation(${plan.id})">OK, compris</button>
+      </div>
     </div>` : ''}
     <div class="today-body">${inlinePlanHtml(item.body || 'Séance à réaliser en aisance, selon sensations.')}</div>
     <textarea class="fi today-note" id="today-note" placeholder="Ressenti après séance : jambes, souffle, douleur, météo, nutrition..."></textarea>
@@ -3128,6 +3203,7 @@ function activityMatchHtml(s){
       <h3>Séance du plan associée</h3>
       <div style="font-size:13px;color:var(--text2);line-height:1.6">${escapeHtml(linked.plan.name)} · Semaine ${escapeHtml(linked.item.weekLabel || linked.item.week || '?')} · ${escapeHtml(linked.item.title)}</div>
       <div class="match-verdict"><strong>${escapeHtml(verdict.label)}</strong><br>${escapeHtml(verdict.deltas)}<br>${escapeHtml(verdict.advice)}</div>
+      ${linked.plan.data?.adaptation && !linked.plan.data.adaptation.dismissed ? `<div class="adapt-card" style="margin-top:10px;margin-bottom:0"><strong>${escapeHtml(linked.plan.data.adaptation.title)}</strong><br>${escapeHtml(linked.plan.data.adaptation.nextAction)}<div class="adapt-actions"><button class="btn btn-p btn-sm" onclick="applyAdaptation(${linked.plan.id})">Appliquer à la prochaine séance</button></div></div>` : ''}
       <button class="btn btn-g btn-sm" style="margin-top:10px" onclick="unlinkActivityPlan('${jsStringArg(s.id)}')">Dissocier</button>
     </div>`;
   }
@@ -3253,6 +3329,7 @@ function linkActivityToPlan(sessionId){
   if(!found) return;
   const { plan, item } = found;
   const verdict = compareActivityToPlan(s, item);
+  createStravaAdaptation(plan, verdict, s, item);
   s.plan_match_key = select.value;
   s.plan_match = {
     planId: plan.id,
