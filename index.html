@@ -3296,11 +3296,24 @@ function activitySplitsHtml(s){
   }).join('');
   return `<div style="font-size:12px;color:var(--text3);margin-bottom:8px">${splits.length} km analysés</div>${rows}`;
 }
+function activityIntensity(s){
+  const avg = Number(s?.hr) || 0;
+  const max = Number(s?.max_hr) || 0;
+  const ratio = avg && max ? avg / max : 0;
+  if(avg && avg < 120) return { level:'easy', label:'Très facile', text:`FC moyenne ${avg} bpm: intensité basse. À classer comme endurance facile/récup, sauf ressenti contraire.` };
+  if(avg && avg < 140) return { level:'easy', label:'Facile', text:`FC moyenne ${avg} bpm: charge cardio maîtrisée. La séance compte, mais elle ne justifie pas d’alerte de surcharge seule.` };
+  if((ratio && ratio >= .88) || avg >= 165) return { level:'hard', label:'Intense', text:`FC moyenne élevée${avg ? ` (${avg} bpm)` : ''}: surveille récupération, sommeil et jambes sur 24-48h.` };
+  if((ratio && ratio >= .78) || avg >= 145) return { level:'moderate', label:'Modérée', text:`FC moyenne ${avg} bpm: séance de charge modérée, à confirmer avec le ressenti et le terrain.` };
+  return { level:'unknown', label:'À qualifier', text:'Intensité cardio insuffisante ou absente. Le ressenti utilisateur devient prioritaire.' };
+}
 function activityCoachText(s){
   const pace = fmtPaceFromSpeed(activityAverageSpeed(s));
   const elevRatio = s.km ? Math.round((Number(s.elev)||0) / Number(s.km)) : 0;
-  if(elevRatio > 60) return `Sortie très trail (${elevRatio} m+/km). À regarder surtout en durée, D+ et sensations, pas en allure.`;
-  if(s.hr && s.max_hr && s.max_hr - s.hr < 18) return `Cardio assez stable et haut. Bonne séance de charge, mais surveille la récupération derrière.`;
+  const intensity = activityIntensity(s);
+  if(intensity.level === 'easy') return `${intensity.text} ${elevRatio > 60 ? `Le profil est trail (${elevRatio} m+/km), donc regarde surtout durée/D+, mais sans parler de grosse séance si les sensations étaient bonnes.` : ''}`.trim();
+  if(intensity.level === 'hard') return intensity.text;
+  if(elevRatio > 60) return `Sortie très trail (${elevRatio} m+/km). À regarder surtout en durée, D+ et sensations, pas en allure. ${intensity.level === 'moderate' ? intensity.text : ''}`.trim();
+  if(intensity.level === 'moderate') return intensity.text;
   if(pace) return `Allure moyenne ${pace}. Ajoute ton ressenti pour que le coach puisse juger si la charge était adaptée.`;
   return `Ajoute ton ressenti pour transformer cette activité en vraie donnée coach.`;
 }
@@ -3353,7 +3366,9 @@ function compareActivityToPlan(s, item){
   const txt = `${item.title || ''} ${item.body || ''}`.toLowerCase();
   const hard = /fraction|côte|seuil|tempo|rapide|soutenu/.test(txt);
   const long = /longue|montagne/.test(txt);
-  const highHr = s.hr && s.max_hr && (Number(s.max_hr) - Number(s.hr) < 25);
+  const intensity = activityIntensity(s);
+  const highHr = intensity.level === 'hard';
+  const easyHr = intensity.level === 'easy';
   let label = 'À vérifier';
   let advice = 'Compare surtout les sensations, le terrain et la fatigue du lendemain.';
   if(score >= 3){
@@ -3370,7 +3385,12 @@ function compareActivityToPlan(s, item){
     label = 'Intense';
     advice = 'Charge cardio élevée. Garde la séance comme faite et évite une autre intensité forte trop vite.';
   }
-  if(long && actualElev > 600) advice = 'Bonne charge trail. Priorité hydratation, sommeil et aisance sur la prochaine sortie.';
+  if(easyHr){
+    advice = `${intensity.text} Séance faite, mais pas une alerte de grosse charge cardio. Adapte surtout selon jambes, douleurs et fatigue du lendemain.`;
+    if(label === 'Intense') label = 'Facile cardio';
+  } else if(long && actualElev > 600){
+    advice = 'Charge trail musculaire intéressante. Priorité hydratation, sommeil et aisance sur la prochaine sortie.';
+  }
   return { label, advice, deltas: deltas.join(' · ') || 'écart non calculable' };
 }
 function activityMatchHtml(s){
