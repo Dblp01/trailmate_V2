@@ -322,6 +322,21 @@ select.fi{cursor:pointer}
 .today-body{font-size:14px;line-height:1.75;color:var(--text2);background:var(--bg2);border:1px solid var(--border);border-radius:var(--rs);padding:14px}
 .today-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
 .today-note{margin-top:10px}
+.week-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:14px;margin-bottom:14px}
+.week-board{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:16px}
+.week-title{font-family:'Syne',sans-serif;font-size:20px;font-weight:800;margin-bottom:5px}
+.week-sub{font-size:13px;color:var(--text2);line-height:1.55}
+.week-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:13px}
+.week-metric{background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:10px}
+.week-metric strong{display:block;font-family:'Syne',sans-serif;font-size:18px;color:var(--text);line-height:1}
+.week-metric span{display:block;margin-top:5px;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;font-weight:800}
+.week-list{display:grid;gap:8px}
+.week-item{display:grid;grid-template-columns:28px 1fr auto;gap:9px;align-items:center;background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:10px}
+.week-item.done{border-color:var(--gbr);background:var(--gb)}
+.week-item .wi-dot{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--bg4);color:var(--text3);font-size:12px;font-weight:800}
+.week-item.done .wi-dot{background:var(--g);color:#0d1a00}
+.wi-title{font-size:13px;font-weight:800;color:var(--text)}
+.wi-meta{font-size:11px;color:var(--text3);margin-top:1px}
 .adapt-card{background:var(--ab);border:1px solid rgba(245,200,66,.25);border-radius:var(--r);padding:13px;margin-bottom:12px;color:var(--text2);font-size:13px;line-height:1.65}
 .adapt-card strong{color:var(--amber)}
 .adapt-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
@@ -418,6 +433,8 @@ select.fi{cursor:pointer}
   .raw-session{padding:11px;margin:9px 0}
   .raw-session-title{font-size:13px}
   .raw-follow-grid{grid-template-columns:1fr}
+  .week-grid{grid-template-columns:1fr}
+  .week-metrics{grid-template-columns:repeat(2,1fr)}
   .today-actions{grid-template-columns:1fr}
   .today-title{font-size:20px}
   .modal-footer{position:sticky;bottom:-18px;background:var(--bg2);padding-top:12px;flex-wrap:wrap}
@@ -466,7 +483,7 @@ select.fi{cursor:pointer}
     <nav class="nav">
       <div class="nsep">Entraînement</div>
       <div class="ni on" onclick="go('dashboard')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Tableau de bord</div>
-      <div class="ni" onclick="go('today')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Séance du jour</div>
+      <div class="ni" onclick="go('today')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Semaine actuelle</div>
       <div class="ni" onclick="go('plans')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Plans IA</div>
       <div class="ni" onclick="go('sessions')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>Mes séances</div>
       <div class="ni" onclick="go('coach')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>Coach IA</div>
@@ -550,7 +567,7 @@ select.fi{cursor:pointer}
     <!-- TODAY -->
     <div id="p-today" class="page">
       <div class="topbar">
-        <div class="tb-left"><h1>Séance du jour</h1><p>La prochaine séance utile du plan actif</p></div>
+        <div class="tb-left"><h1>Semaine actuelle</h1><p>Prévu, réalisé, séances restantes et décision coach</p></div>
         <div class="tb-right">
           <button class="btn btn-g btn-sm" onclick="renderToday()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>Actualiser</button>
           <button class="btn btn-p btn-sm" onclick="go('plans')">Plans</button>
@@ -2150,6 +2167,52 @@ function getTodayPlanSession(){
   return items.find(item => !planSessionDone(plan, item)) || items[0] || null;
 }
 
+function currentWeekItems(plan){
+  const items = allPlanItems(plan);
+  if(!items.length) return { week:'?', items:[] };
+  const next = items.find(item => !planSessionDone(plan, item)) || items[items.length - 1];
+  const week = next.week || next.weekLabel || '?';
+  return { week, items:items.filter(item => String(item.week || item.weekLabel) === String(week)) };
+}
+
+function weekItemActual(plan, item){
+  if(!item) return null;
+  if(!item.raw && item.session?.stravaSessionId){
+    return DB.sessions.find(s => String(s.id) === String(item.session.stravaSessionId)) || null;
+  }
+  return DB.sessions.find(s => String(s.plan_match_key || '') === planItemKey(item)) || null;
+}
+
+function weekActualTotals(plan, items){
+  return items.reduce((acc,item) => {
+    const actual = weekItemActual(plan, item);
+    if(actual){
+      acc.done++;
+      acc.min += Math.round(activityDurationSeconds(actual) / 60);
+      acc.elev += Number(actual.elev) || 0;
+    } else if(planSessionDone(plan, item)){
+      acc.done++;
+    }
+    return acc;
+  }, { done:0, min:0, elev:0 });
+}
+
+function plannedWeekTotals(items){
+  return items.reduce((acc,item) => {
+    acc.min += parseDurationToMinutes(item.duration);
+    acc.elev += parseElevMeters(item.elev);
+    return acc;
+  }, { min:0, elev:0 });
+}
+
+function minutesLabel(min){
+  const n = Math.round(Number(min) || 0);
+  if(!n) return '-';
+  const h = Math.floor(n / 60);
+  const m = n % 60;
+  return h ? `${h}h${String(m).padStart(2,'0')}` : `${m}min`;
+}
+
 function latestAdaptation(plan){
   const a = plan?.data?.adaptation;
   if(!a || a.dismissed) return null;
@@ -2261,11 +2324,58 @@ function renderToday(){
   const plan = DB.plans[DB.plans.length - 1];
   const item = getTodayPlanSession();
   if(!plan || !item){
-    el.innerHTML = `<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><h3>Aucune séance prévue</h3><p>Crée un plan IA pour afficher ta prochaine séance ici.</p><button class="btn btn-p btn-sm" onclick="openModal('modal-plan')">Créer un plan</button></div>`;
+    el.innerHTML = `<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><h3>Aucune semaine active</h3><p>Crée un plan IA pour afficher ta semaine actuelle ici.</p><button class="btn btn-p btn-sm" onclick="openModal('modal-plan')">Créer un plan</button></div>`;
     return;
   }
   const adaptation = latestAdaptation(plan);
-  el.innerHTML = `<div class="today-hero">
+  const week = currentWeekItems(plan);
+  const planned = plannedWeekTotals(week.items);
+  const actual = weekActualTotals(plan, week.items);
+  const remaining = week.items.filter(x => !planSessionDone(plan, x));
+  const weekRows = week.items.map((x,idx) => {
+    const done = planSessionDone(plan, x);
+    const actualSession = weekItemActual(plan, x);
+    return `<div class="week-item ${done ? 'done' : ''}">
+      <div class="wi-dot">${done ? '✓' : idx + 1}</div>
+      <div>
+        <div class="wi-title">${escapeHtml(x.title || 'Séance')}</div>
+        <div class="wi-meta">${[x.duration, x.elev ? `${x.elev} m+` : '', actualSession ? `réalisé ${actualSession.dur || ''}` : ''].filter(Boolean).join(' · ')}</div>
+      </div>
+      ${actualSession ? `<button class="btn btn-g btn-sm" onclick="openActivityDetail('${jsStringArg(actualSession.id)}')">Voir</button>` : `<button class="btn btn-g btn-sm" onclick="viewPlan(${plan.id})">Plan</button>`}
+    </div>`;
+  }).join('');
+  const weekAdvice = adaptation
+    ? adaptation.nextAction
+    : remaining.length
+      ? `Il reste ${remaining.length} séance${remaining.length > 1 ? 's' : ''}. Continue sans compenser, en gardant le ressenti prioritaire.`
+      : 'Semaine complétée. Ajoute tes ressentis puis laisse le coach préparer la suite.';
+  el.innerHTML = `<div class="week-grid">
+    <div class="week-board">
+      <div class="today-kicker">${escapeHtml(plan.name || 'Plan actif')}</div>
+      <div class="week-title">Semaine ${escapeHtml(week.week)}</div>
+      <div class="week-sub">${escapeHtml(weekAdvice)}</div>
+      <div class="week-metrics">
+        <div class="week-metric"><strong>${actual.done}/${week.items.length}</strong><span>Séances faites</span></div>
+        <div class="week-metric"><strong>${minutesLabel(actual.min)}</strong><span>Durée réalisée</span></div>
+        <div class="week-metric"><strong>${actual.elev || 0}</strong><span>D+ réalisé</span></div>
+        <div class="week-metric"><strong>${minutesLabel(planned.min)}</strong><span>Durée prévue</span></div>
+      </div>
+      ${adaptation ? `<div class="adapt-card" style="margin-top:12px">
+        <strong>${escapeHtml(adaptation.title)}</strong><br>
+        ${escapeHtml(adaptation.advice)}<br>
+        <span style="color:var(--text3)">${escapeHtml(adaptation.nextAction)}</span>
+        <div class="adapt-actions">
+          ${adaptation.kind ? `<button class="btn btn-p btn-sm" onclick="applyAdaptation(${plan.id})">Appliquer</button>` : ''}
+          <button class="btn btn-g btn-sm" onclick="dismissAdaptation(${plan.id})">OK, compris</button>
+        </div>
+      </div>` : ''}
+    </div>
+    <div class="week-board">
+      <div class="ch"><div class="ct">Séances de la semaine</div><button class="btn btn-g btn-sm" onclick="viewPlan(${plan.id})">Plan</button></div>
+      <div class="week-list">${weekRows}</div>
+    </div>
+  </div>
+  <div class="today-hero">
     <div class="today-kicker">${escapeHtml(plan.name || 'Plan actif')} · Semaine ${escapeHtml(item.weekLabel || item.week || '?')}</div>
     <div class="today-title">${escapeHtml(item.title || 'Séance')}</div>
     <div class="today-meta">
@@ -2273,15 +2383,6 @@ function renderToday(){
       ${item.elev ? `<span class="raw-chip">${escapeHtml(item.elev)} m+</span>` : ''}
       <span class="raw-chip">Prochaine séance</span>
     </div>
-    ${adaptation ? `<div class="adapt-card">
-      <strong>${escapeHtml(adaptation.title)}</strong><br>
-      ${escapeHtml(adaptation.advice)}<br>
-      <span style="color:var(--text3)">${escapeHtml(adaptation.nextAction)}</span>
-      <div class="adapt-actions">
-        ${adaptation.kind ? `<button class="btn btn-p btn-sm" onclick="applyAdaptation(${plan.id})">Appliquer</button>` : ''}
-        <button class="btn btn-g btn-sm" onclick="dismissAdaptation(${plan.id})">OK, compris</button>
-      </div>
-    </div>` : ''}
     <div class="today-body">${inlinePlanHtml(item.body || 'Séance à réaliser en aisance, selon sensations.')}</div>
     <textarea class="fi today-note" id="today-note" placeholder="Ressenti après séance : jambes, souffle, douleur, météo, nutrition..."></textarea>
     <div class="today-actions">
