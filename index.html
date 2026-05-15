@@ -2902,10 +2902,10 @@ async function syncStrava(){
     if(res.status === 401){ stravaLogout(); return; }
     const acts = await res.json();
     let added = 0;
+    let updated = 0;
     for(const a of acts){
       if(!['Run','TrailRun','Hike'].includes(a.type)) continue;
-      if(DB.sessions.find(s => s.strava_id === a.id)) continue;
-      DB.sessions.push({
+      const payload = {
         id:       Date.now() + Math.random(),
         strava_id: a.id,
         type:     a.type==='Hike' ? 'Marche rapide' : 'Sortie longue trail',
@@ -2923,16 +2923,38 @@ async function syncStrava(){
         notes:    a.name || '',
         feedback: '',
         source:   'strava'
-      });
-      added++;
+      };
+      const existing = DB.sessions.find(s => String(s.strava_id) === String(a.id));
+      if(existing){
+        Object.assign(existing, { ...payload, id:existing.id, feedback:existing.feedback || '', notes_user:existing.notes_user || '' });
+        updated++;
+      } else {
+        DB.sessions.push(payload);
+        added++;
+      }
     }
     save('sessions'); renderSessions(); renderDash();
-    btn.textContent = added ? `+${added} activités !` : 'À jour ✓';
+    btn.textContent = added ? `+${added} activités !` : updated ? `${updated} mises à jour ✓` : 'À jour ✓';
   } catch(e){ btn.textContent = 'Erreur'; }
   setTimeout(() => { btn.disabled=false; btn.innerHTML='<svg viewBox="0 0 24 24" fill="currentColor" width="13" height="13"><path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0l-7 13.828h4.169"/></svg> Sync Strava'; }, 2500);
 }
 
 function fmtDur(sec){ const h=Math.floor(sec/3600); const m=Math.floor((sec%3600)/60); return h ? `${h}h${String(m).padStart(2,'0')}` : `${m}min`; }
+function activityDurationSeconds(s){
+  if(Number(s?.moving_time)) return Number(s.moving_time);
+  const txt = String(s?.dur || '').toLowerCase().replace(',', '.');
+  const h = txt.match(/(\d+(?:\.\d+)?)\s*h/);
+  const m = txt.match(/(\d+)\s*min/);
+  if(h) return Math.round(Number(h[1]) * 3600 + (m ? Number(m[1]) * 60 : 0));
+  if(m) return Number(m[1]) * 60;
+  return 0;
+}
+function activityAverageSpeed(s){
+  if(Number(s?.average_speed)) return Number(s.average_speed);
+  const sec = activityDurationSeconds(s);
+  const km = Number(s?.km) || 0;
+  return sec && km ? (km * 1000) / sec : 0;
+}
 function fmtPaceFromSpeed(mps){
   const speed = Number(mps) || 0;
   if(!speed) return '';
@@ -2987,7 +3009,7 @@ function activityRouteSvg(s){
 }
 function activitySplitsHtml(s){
   const splits = s.strava_detail?.splits_metric || s.splits_metric || [];
-  if(!splits.length) return `<div style="font-size:13px;color:var(--text3);line-height:1.6">Pas de splits kilométriques disponibles pour cette activité. Allure moyenne : ${fmtPaceFromSpeed(s.average_speed) || 'n/a'}.</div>`;
+  if(!splits.length) return `<div style="font-size:13px;color:var(--text3);line-height:1.6">Splits kilométriques non disponibles pour cette activité. Allure moyenne calculée : ${fmtPaceFromSpeed(activityAverageSpeed(s)) || 'n/a'}.</div>`;
   const paces = splits.map(x => x.moving_time && x.distance ? x.moving_time / (x.distance / 1000) : 0).filter(Boolean);
   const slowest = Math.max(...paces, 1);
   return splits.slice(0, 12).map((x, i) => {
@@ -2997,7 +3019,7 @@ function activitySplitsHtml(s){
   }).join('');
 }
 function activityCoachText(s){
-  const pace = fmtPaceFromSpeed(s.average_speed);
+  const pace = fmtPaceFromSpeed(activityAverageSpeed(s));
   const elevRatio = s.km ? Math.round((Number(s.elev)||0) / Number(s.km)) : 0;
   if(elevRatio > 60) return `Sortie très trail (${elevRatio} m+/km). À regarder surtout en durée, D+ et sensations, pas en allure.`;
   if(s.hr && s.max_hr && s.max_hr - s.hr < 18) return `Cardio assez stable et haut. Bonne séance de charge, mais surveille la récupération derrière.`;
@@ -3039,7 +3061,7 @@ function renderActivityDetail(s, loading=false){
     ['Distance', s.km ? `${s.km} km` : '-'],
     ['Durée', s.dur || fmtDur(s.moving_time || 0) || '-'],
     ['D+', s.elev ? `${s.elev} m+` : '-'],
-    ['Allure', fmtPaceFromSpeed(s.average_speed) || '-'],
+    ['Allure', fmtPaceFromSpeed(activityAverageSpeed(s)) || '-'],
     ['FC moy', s.hr ? `${s.hr} bpm` : '-'],
     ['FC max', s.max_hr ? `${s.max_hr} bpm` : '-'],
     ['Temps total', s.elapsed_time ? fmtDur(s.elapsed_time) : '-'],
@@ -3060,6 +3082,7 @@ function renderActivityDetail(s, loading=false){
   <div class="activity-section">
     <h3>Lecture coach</h3>
     <div style="font-size:13px;color:var(--text2);line-height:1.65">${escapeHtml(activityCoachText(s))}</div>
+    ${s.strava_id ? `<button class="btn btn-g btn-sm" style="margin-top:10px" onclick="refreshActivityDetail('${jsStringArg(s.id)}')">Actualiser Strava</button>` : ''}
   </div>
   <div class="activity-section">
     <h3>Ressenti</h3>
@@ -3081,6 +3104,22 @@ async function openActivityDetail(id){
       const el = document.getElementById('activity-detail-content');
       if(el) el.insertAdjacentHTML('afterbegin', `<div class="adapt-card"><strong>Détail Strava indisponible.</strong> La fiche affiche les données déjà synchronisées.</div>`);
     }
+  }
+}
+async function refreshActivityDetail(id){
+  const s = DB.sessions.find(x => String(x.id) === String(id));
+  if(!s) return;
+  s.strava_detail_loaded = false;
+  renderActivityDetail(s, true);
+  try{
+    await enrichStravaActivity(s);
+    renderActivityDetail(s, false);
+    renderSessions();
+    renderStravaPage();
+  } catch(e){
+    renderActivityDetail(s, false);
+    const el = document.getElementById('activity-detail-content');
+    if(el) el.insertAdjacentHTML('afterbegin', `<div class="adapt-card"><strong>Impossible d’actualiser Strava.</strong> Essaie depuis le lien Netlify si tu es en local file://.</div>`);
   }
 }
 function updateActivityNotes(id, value){
@@ -3132,7 +3171,7 @@ function renderStravaPage(){
         ${s.km?`<span>📍 ${s.km}km</span>`:''}
         ${s.dur?`<span>⏱ ${s.dur}</span>`:''}
         ${s.elev?`<span>⬆ ${s.elev}m+</span>`:''}
-        ${s.average_speed?`<span>⚡ ${fmtPaceFromSpeed(s.average_speed)}</span>`:''}
+        ${activityAverageSpeed(s)?`<span>⚡ ${fmtPaceFromSpeed(activityAverageSpeed(s))}</span>`:''}
         ${s.hr?`<span>❤️ ${s.hr}bpm</span>`:''}
       </div>
     </div>
