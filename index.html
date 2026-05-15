@@ -255,6 +255,14 @@ select.fi{cursor:pointer}
 .ps-steps{font-size:12px;color:var(--text2);line-height:1.65;padding-left:17px;margin:0}
 .ps-steps li{margin-bottom:4px}
 .ps-feel{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px}
+.session-brief{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:10px}
+.brief-cell{background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:12px;padding:10px;min-height:74px}
+.brief-cell.on{border-color:var(--gbr);background:var(--gb)}
+.brief-cell.warn{border-color:rgba(245,200,66,.24);background:var(--ab)}
+.brief-label{font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin-bottom:5px}
+.brief-value{font-size:12px;color:var(--text2);line-height:1.45}
+.brief-value strong{color:var(--text)}
+.session-card-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .raw-plan{font-size:14px;color:var(--text2);line-height:1.75;padding:16px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);white-space:normal}
 .raw-plan h3{font-family:'Syne',sans-serif;font-size:17px;color:var(--g);margin:20px 0 8px;border-top:1px solid var(--border);padding-top:16px}
 .raw-plan h3:first-child{margin-top:0;border-top:0;padding-top:0}
@@ -419,6 +427,7 @@ select.fi{cursor:pointer}
   .ps-icon{width:32px;height:32px}
   .ps-stats{margin-left:0;width:100%}
   .ps-detail{grid-template-columns:1fr}
+  .session-brief{grid-template-columns:1fr}
   .ps-feedback{grid-template-columns:1fr}
   .ps-feedback .btn{justify-content:center}
   .ps-feel{grid-template-columns:1fr}
@@ -2449,7 +2458,8 @@ function viewPlan(id){
             ${s.recuperation ? `<div class="ps-metric"><div class="ps-ml">Récup</div><div class="ps-mv">${s.recuperation}</div></div>` : ''}
           </div>` : ''}
           ${s.conseil ? `<div class="ps-conseil"><strong>Conseil coach</strong><br>${s.conseil}</div>` : ''}
-          <button class="ps-toggle" onclick="toggleSessionDetails('${extraId}')">Voir le détail de la séance</button>
+          ${sessionUnifiedCard(p, wi, si)}
+          <button class="ps-toggle" onclick="toggleSessionDetails('${extraId}')">Voir le déroulé recommandé</button>
           <div class="ps-extra" id="${extraId}">
             <div class="ps-ml">Déroulé recommandé</div>
             <ol class="ps-steps">${steps.map(x => `<li>${x}</li>`).join('')}</ol>
@@ -2474,6 +2484,60 @@ function viewPlan(id){
 
   document.getElementById('pv-content').innerHTML = html;
   openModal('modal-pv');
+}
+
+function planSessionLinkedActivity(planId, session){
+  if(!session) return null;
+  if(session.stravaSessionId) return DB.sessions.find(x => String(x.id) === String(session.stravaSessionId)) || null;
+  return [...DB.sessions]
+    .filter(x => String(x.plan_id || '') === String(planId) && String(x.type || '').toLowerCase() === String(session.type || '').toLowerCase())
+    .sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0))[0] || null;
+}
+
+function planSessionItem(plan, weekIndex, sessionIndex){
+  const s = plan?.data?.semaines?.[weekIndex]?.seances?.[sessionIndex];
+  const w = plan?.data?.semaines?.[weekIndex];
+  if(!s) return null;
+  return {
+    planId: plan.id,
+    week: w?.numero || weekIndex + 1,
+    weekLabel: String(w?.numero || weekIndex + 1),
+    index: sessionIndex + 1,
+    title: `${s.jour || ''} · ${s.type || 'Séance'}`.replace(/^ · /,''),
+    body: [s.objectif, s.description, s.conseil].filter(Boolean).join('\n\n'),
+    duration: s.duree || '',
+    elev: s.denivele_m ? String(s.denivele_m) : '',
+    raw:false,
+    weekIndex,
+    sessionIndex,
+    session:s
+  };
+}
+
+function sessionUnifiedCard(plan, weekIndex, sessionIndex){
+  const s = plan?.data?.semaines?.[weekIndex]?.seances?.[sessionIndex];
+  if(!s) return '';
+  const activity = planSessionLinkedActivity(plan.id, s);
+  const item = planSessionItem(plan, weekIndex, sessionIndex);
+  const verdict = activity && item ? compareActivityToPlan(activity, item) : null;
+  const doneText = s.done ? 'Fait' : 'À faire';
+  const actualText = activity
+    ? `${activity.dur || '-'} · ${activity.elev || 0} m+${activity.hr ? ` · ${activity.hr} bpm` : ''}`
+    : 'Pas encore reliée à Strava ou ajoutée aux séances';
+  const feelingText = [s.feeling, s.fatigue ? `fatigue ${s.fatigue}` : '', s.feedback ? 'note ajoutée' : ''].filter(Boolean).join(' · ') || 'Ressenti manquant';
+  const verdictText = verdict ? `${verdict.label} · ${verdict.deltas}` : (s.done ? 'Séance validée, ajoute Strava/ressenti pour préciser.' : 'À juger après réalisation.');
+  const impactText = verdict ? verdict.advice : (s.done ? 'Garde la suite si récupération OK.' : 'Le coach décidera après ressenti ou activité Strava.');
+  return `<div class="session-brief">
+    <div class="brief-cell ${s.done ? 'on' : ''}"><div class="brief-label">Prévu</div><div class="brief-value"><strong>${escapeHtml(s.duree || '-')}</strong><br>${escapeHtml(s.denivele_m ? `${s.denivele_m} m+` : 'D+ libre')}</div></div>
+    <div class="brief-cell ${activity ? 'on' : 'warn'}"><div class="brief-label">Réalisé</div><div class="brief-value">${escapeHtml(actualText)}</div></div>
+    <div class="brief-cell ${s.feeling || s.feedback ? 'on' : 'warn'}"><div class="brief-label">Ressenti</div><div class="brief-value">${escapeHtml(feelingText)}</div></div>
+    <div class="brief-cell ${verdict ? 'on' : ''}"><div class="brief-label">Verdict</div><div class="brief-value">${escapeHtml(verdictText)}</div></div>
+    <div class="brief-cell ${verdict?.label?.includes('dur') || verdict?.label === 'Intense' ? 'warn' : 'on'}"><div class="brief-label">Impact suite</div><div class="brief-value">${escapeHtml(impactText)}</div></div>
+  </div>
+  <div class="session-card-actions">
+    ${activity ? `<button class="btn btn-g btn-sm" onclick="openActivityDetail('${jsStringArg(activity.id)}')">Voir réalisé</button>` : `<button class="btn btn-g btn-sm" onclick="go('sessions')">Associer Strava</button>`}
+    <button class="btn btn-g btn-sm" onclick="toggleSessionDetails('pex-${plan.id}-${weekIndex}-${sessionIndex}')">Déroulé</button>
+  </div>`;
 }
 
 function sessionSteps(s){
