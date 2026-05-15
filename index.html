@@ -322,6 +322,9 @@ select.fi{cursor:pointer}
 .activity-stat-value{font-size:15px;color:var(--text);font-weight:800}
 .activity-section{background:var(--bg3);border:1px solid var(--border);border-radius:16px;padding:14px;margin-top:10px}
 .activity-section h3{font-family:'Syne',sans-serif;font-size:15px;margin-bottom:9px}
+.activity-match{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end}
+.match-verdict{margin-top:10px;background:var(--gb);border:1px solid var(--gbr);border-radius:12px;padding:11px;font-size:13px;color:var(--text2);line-height:1.55}
+.match-verdict strong{color:var(--g)}
 .split-row{display:grid;grid-template-columns:42px 1fr 58px;gap:8px;align-items:center;font-size:12px;color:var(--text2);padding:5px 0}
 .split-bar{height:8px;border-radius:999px;background:var(--gb);overflow:hidden}
 .split-fill{height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--g),var(--amber))}
@@ -371,6 +374,7 @@ select.fi{cursor:pointer}
   .modal-wide{width:100%;height:100dvh;max-height:100dvh;border-radius:0;padding:14px}
   .activity-hero{grid-template-columns:1fr}
   .activity-stats{grid-template-columns:repeat(2,1fr)}
+  .activity-match{grid-template-columns:1fr}
   .split-row{grid-template-columns:38px 1fr 54px}
   .overlay{padding:12px;align-items:flex-end}
   #modal-pv.overlay{padding:0;align-items:stretch}
@@ -2955,6 +2959,26 @@ function activityAverageSpeed(s){
   const km = Number(s?.km) || 0;
   return sec && km ? (km * 1000) / sec : 0;
 }
+function parseDurationToMinutes(value){
+  const txt = String(value || '').toLowerCase().replace(',', '.');
+  if(!txt) return 0;
+  const range = txt.match(/(\d+(?:\.\d+)?)\s*h(?:\s*(\d+))?\s*[–-]\s*(\d+(?:\.\d+)?)\s*h(?:\s*(\d+))?/);
+  if(range){
+    const a = Number(range[1]) * 60 + (range[2] ? Number(range[2]) : 0);
+    const b = Number(range[3]) * 60 + (range[4] ? Number(range[4]) : 0);
+    return Math.round((a + b) / 2);
+  }
+  const h = txt.match(/(\d+(?:\.\d+)?)\s*h/);
+  const m = txt.match(/(\d+)\s*min/);
+  if(h) return Math.round(Number(h[1]) * 60 + (m ? Number(m[1]) : 0));
+  if(m) return Number(m[1]);
+  const n = txt.match(/\d+/);
+  return n ? Number(n[0]) : 0;
+}
+function parseElevMeters(value){
+  const n = String(value || '').match(/\d+/);
+  return n ? Number(n[0]) : 0;
+}
 function fmtPaceFromSpeed(mps){
   const speed = Number(mps) || 0;
   if(!speed) return '';
@@ -3027,6 +3051,97 @@ function activityCoachText(s){
   if(pace) return `Allure moyenne ${pace}. Ajoute ton ressenti pour que le coach puisse juger si la charge était adaptée.`;
   return `Ajoute ton ressenti pour transformer cette activité en vraie donnée coach.`;
 }
+function latestPlan(){
+  return [...DB.plans].sort((a,b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))[0] || null;
+}
+function allPlanItems(plan){
+  return plan?.data?.rawText ? rawPlanItems(plan) : structuredPlanItems(plan);
+}
+function planItemKey(item){
+  return item.raw
+    ? `${item.planId}|raw|${item.week}|${item.index}`
+    : `${item.planId}|structured|${item.weekIndex}|${item.sessionIndex}`;
+}
+function findPlanItemByKey(key){
+  for(const plan of DB.plans){
+    const item = allPlanItems(plan).find(x => planItemKey(x) === key);
+    if(item) return { plan, item };
+  }
+  return null;
+}
+function planCandidatesForActivity(s){
+  const plan = latestPlan();
+  if(!plan) return [];
+  const items = allPlanItems(plan);
+  const undone = items.filter(item => !planSessionDone(plan, item));
+  return (undone.length ? undone : items).slice(0, 18);
+}
+function compareActivityToPlan(s, item){
+  const actualMin = Math.round(activityDurationSeconds(s) / 60);
+  const plannedMin = parseDurationToMinutes(item.duration);
+  const actualElev = Number(s.elev) || 0;
+  const plannedElev = parseElevMeters(item.elev);
+  const deltas = [];
+  let score = 0;
+  if(plannedMin && actualMin){
+    const diff = Math.round(((actualMin - plannedMin) / plannedMin) * 100);
+    deltas.push(`durée ${diff >= 0 ? '+' : ''}${diff}%`);
+    if(Math.abs(diff) <= 15) score += 2;
+    else if(Math.abs(diff) <= 30) score += 1;
+    else score -= 1;
+  }
+  if(plannedElev && actualElev){
+    const diff = Math.round(((actualElev - plannedElev) / plannedElev) * 100);
+    deltas.push(`D+ ${diff >= 0 ? '+' : ''}${diff}%`);
+    if(Math.abs(diff) <= 20) score += 2;
+    else if(Math.abs(diff) <= 40) score += 1;
+    else score -= 1;
+  }
+  const txt = `${item.title || ''} ${item.body || ''}`.toLowerCase();
+  const hard = /fraction|côte|seuil|tempo|rapide|soutenu/.test(txt);
+  const long = /longue|montagne/.test(txt);
+  const highHr = s.hr && s.max_hr && (Number(s.max_hr) - Number(s.hr) < 25);
+  let label = 'À vérifier';
+  let advice = 'Compare surtout les sensations, le terrain et la fatigue du lendemain.';
+  if(score >= 3){
+    label = 'Conforme au plan';
+    advice = 'Séance validée. Tu peux garder la suite du plan si les sensations restent bonnes.';
+  } else if(score <= -1 && (actualMin > plannedMin || actualElev > plannedElev)){
+    label = 'Plus dur que prévu';
+    advice = 'Séance validée, mais surveille la récupération. Si jambes lourdes, allège la prochaine séance.';
+  } else if(score <= -1){
+    label = 'Plus léger que prévu';
+    advice = 'Séance faite, mais charge incomplète. Ne compense pas brutalement, reprends normalement.';
+  }
+  if(hard && highHr){
+    label = 'Intense';
+    advice = 'Charge cardio élevée. Garde la séance comme faite et évite une autre intensité forte trop vite.';
+  }
+  if(long && actualElev > 600) advice = 'Bonne charge trail. Priorité hydratation, sommeil et aisance sur la prochaine sortie.';
+  return { label, advice, deltas: deltas.join(' · ') || 'écart non calculable' };
+}
+function activityMatchHtml(s){
+  const linked = s.plan_match_key ? findPlanItemByKey(s.plan_match_key) : null;
+  if(linked){
+    const verdict = compareActivityToPlan(s, linked.item);
+    return `<div class="activity-section">
+      <h3>Séance du plan associée</h3>
+      <div style="font-size:13px;color:var(--text2);line-height:1.6">${escapeHtml(linked.plan.name)} · Semaine ${escapeHtml(linked.item.weekLabel || linked.item.week || '?')} · ${escapeHtml(linked.item.title)}</div>
+      <div class="match-verdict"><strong>${escapeHtml(verdict.label)}</strong><br>${escapeHtml(verdict.deltas)}<br>${escapeHtml(verdict.advice)}</div>
+      <button class="btn btn-g btn-sm" style="margin-top:10px" onclick="unlinkActivityPlan('${jsStringArg(s.id)}')">Dissocier</button>
+    </div>`;
+  }
+  const candidates = planCandidatesForActivity(s);
+  if(!candidates.length) return `<div class="activity-section"><h3>Associer au plan</h3><div style="font-size:13px;color:var(--text3)">Aucun plan actif disponible.</div></div>`;
+  const options = candidates.map(item => `<option value="${escapeHtml(planItemKey(item))}">S${escapeHtml(item.weekLabel || item.week || '?')} · ${escapeHtml(item.title)}${item.duration ? ` · ${escapeHtml(item.duration)}` : ''}${item.elev ? ` · ${escapeHtml(item.elev)}m+` : ''}</option>`).join('');
+  return `<div class="activity-section">
+    <h3>Associer au plan</h3>
+    <div class="activity-match">
+      <div><label class="fl">Séance prévue</label><select class="fi" id="match-${jsStringArg(s.id)}">${options}</select></div>
+      <button class="btn btn-p btn-sm" onclick="linkActivityToPlan('${jsStringArg(s.id)}')">Associer</button>
+    </div>
+  </div>`;
+}
 async function enrichStravaActivity(s){
   if(!stravaToken || !s?.strava_id || s.strava_detail_loaded) return s;
   const res = await fetch(`https://www.strava.com/api/v3/activities/${s.strava_id}?include_all_efforts=false`, {
@@ -3080,6 +3195,7 @@ function renderActivityDetail(s, loading=false){
     <h3>Allures par km</h3>
     ${activitySplitsHtml(s)}
   </div>
+  ${activityMatchHtml(s)}
   <div class="activity-section">
     <h3>Lecture coach</h3>
     <div style="font-size:13px;color:var(--text2);line-height:1.65">${escapeHtml(activityCoachText(s))}</div>
@@ -3128,6 +3244,67 @@ function updateActivityNotes(id, value){
   if(!s) return;
   s.notes_user = value;
   save('sessions');
+}
+function linkActivityToPlan(sessionId){
+  const s = DB.sessions.find(x => String(x.id) === String(sessionId));
+  const select = document.getElementById(`match-${sessionId}`);
+  if(!s || !select?.value) return;
+  const found = findPlanItemByKey(select.value);
+  if(!found) return;
+  const { plan, item } = found;
+  const verdict = compareActivityToPlan(s, item);
+  s.plan_match_key = select.value;
+  s.plan_match = {
+    planId: plan.id,
+    planName: plan.name,
+    week: item.week,
+    weekLabel: item.weekLabel,
+    title: item.title,
+    verdict: verdict.label,
+    linkedAt: new Date().toISOString()
+  };
+  if(item.raw){
+    plan.data.rawLogs = plan.data.rawLogs || [];
+    const exists = plan.data.rawLogs.some(l => String(l.stravaSessionId) === String(s.id));
+    if(!exists){
+      plan.data.rawLogs.push({
+        week:item.week,
+        name:item.title,
+        status: verdict.label === 'Plus dur que prévu' ? 'Trop dur' : 'Fait',
+        date:s.date || tod(),
+        duration:s.dur || '',
+        elev:s.elev || '',
+        feeling: verdict.label,
+        fatigue: verdict.label === 'Plus dur que prévu' ? 'Élevée' : 'Normale',
+        notes:`Associée à Strava: ${s.notes || s.type || 'activité'} · ${verdict.deltas}. ${verdict.advice}`,
+        stravaSessionId:s.id
+      });
+    }
+  } else {
+    const ps = plan.data?.semaines?.[item.weekIndex]?.seances?.[item.sessionIndex];
+    if(ps){
+      ps.done = true;
+      ps.doneAt = new Date().toISOString();
+      ps.stravaSessionId = s.id;
+      ps.feedback = `${verdict.label} · ${verdict.deltas}. ${verdict.advice}`;
+      ps.feeling = verdict.label === 'Plus dur que prévu' ? 'Trop dur' : verdict.label === 'Plus léger que prévu' ? 'Très facile' : 'Bien';
+    }
+  }
+  save('sessions');
+  save('plans');
+  renderActivityDetail(s, false);
+  renderSessions();
+  renderPlans();
+  renderToday();
+}
+function unlinkActivityPlan(sessionId){
+  const s = DB.sessions.find(x => String(x.id) === String(sessionId));
+  if(!s) return;
+  delete s.plan_match_key;
+  delete s.plan_match;
+  save('sessions');
+  renderActivityDetail(s, false);
+  renderSessions();
 }
 
 function renderStravaPage(){
