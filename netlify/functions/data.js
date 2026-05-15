@@ -20,6 +20,20 @@ const emptyData = () => ({
   }
 });
 
+function blobStoreOptions() {
+  const siteID = process.env.NETLIFY_SITE_ID || process.env.SITE_ID;
+  const token = process.env.NETLIFY_AUTH_TOKEN;
+  return siteID && token ? { siteID, token } : undefined;
+}
+
+function blobStoreError(action, error) {
+  const missing = [];
+  if (!(process.env.NETLIFY_SITE_ID || process.env.SITE_ID)) missing.push('NETLIFY_SITE_ID');
+  if (!process.env.NETLIFY_AUTH_TOKEN) missing.push('NETLIFY_AUTH_TOKEN');
+  const hint = missing.length ? ` Variables Netlify manquantes: ${missing.join(', ')}.` : '';
+  return new Error(`Netlify Blobs ${action} failed: ${error.message}.${hint}`);
+}
+
 function isServerlessRuntime() {
   return Boolean(
     process.env.NETLIFY ||
@@ -53,11 +67,12 @@ exports.handler = async (event) => {
 async function readData() {
   try {
     const { getStore } = await import('@netlify/blobs');
-    const store = getStore('trailmate');
+    const options = blobStoreOptions();
+    const store = options ? getStore('trailmate', options) : getStore('trailmate');
     const value = await store.get(BLOB_KEY, { type: 'json', consistency: 'strong' });
     return normalize(value || emptyData());
   } catch (e) {
-    if (isServerlessRuntime()) throw new Error(`Netlify Blobs read failed: ${e.message}`);
+    if (isServerlessRuntime()) throw blobStoreError('read', e);
     if (!fs.existsSync(LOCAL_FILE)) return emptyData();
     return normalize(JSON.parse(fs.readFileSync(LOCAL_FILE, 'utf8')));
   }
@@ -66,10 +81,11 @@ async function readData() {
 async function writeData(data) {
   try {
     const { getStore } = await import('@netlify/blobs');
-    const store = getStore('trailmate');
+    const options = blobStoreOptions();
+    const store = options ? getStore('trailmate', options) : getStore('trailmate');
     await store.setJSON(BLOB_KEY, data, { consistency: 'strong' });
   } catch (e) {
-    if (isServerlessRuntime()) throw new Error(`Netlify Blobs write failed: ${e.message}`);
+    if (isServerlessRuntime()) throw blobStoreError('write', e);
     fs.writeFileSync(LOCAL_FILE, JSON.stringify(data, null, 2));
   }
 }
