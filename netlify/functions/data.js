@@ -20,6 +20,14 @@ const emptyData = () => ({
   }
 });
 
+function isServerlessRuntime() {
+  return Boolean(
+    process.env.NETLIFY ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.LAMBDA_TASK_ROOT
+  );
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
 
@@ -49,7 +57,7 @@ async function readData() {
     const value = await store.get(BLOB_KEY, { type: 'json', consistency: 'strong' });
     return normalize(value || emptyData());
   } catch (e) {
-    if (process.env.NETLIFY) throw new Error(`Netlify Blobs read failed: ${e.message}`);
+    if (isServerlessRuntime()) throw new Error(`Netlify Blobs read failed: ${e.message}`);
     if (!fs.existsSync(LOCAL_FILE)) return emptyData();
     return normalize(JSON.parse(fs.readFileSync(LOCAL_FILE, 'utf8')));
   }
@@ -61,7 +69,7 @@ async function writeData(data) {
     const store = getStore('trailmate');
     await store.setJSON(BLOB_KEY, data, { consistency: 'strong' });
   } catch (e) {
-    if (process.env.NETLIFY) throw new Error(`Netlify Blobs write failed: ${e.message}`);
+    if (isServerlessRuntime()) throw new Error(`Netlify Blobs write failed: ${e.message}`);
     fs.writeFileSync(LOCAL_FILE, JSON.stringify(data, null, 2));
   }
 }

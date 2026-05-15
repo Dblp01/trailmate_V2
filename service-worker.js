@@ -1,4 +1,4 @@
-const CACHE_NAME = 'trailmate-v2-pwa-24';
+const CACHE_NAME = 'trailmate-v2-pwa-25';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
