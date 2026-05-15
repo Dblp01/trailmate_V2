@@ -3254,8 +3254,11 @@ async function syncStrava(){
         added++;
       }
     }
-    save('sessions'); renderSessions(); renderDash();
-    btn.textContent = added ? `+${added} activités !` : updated ? `${updated} mises à jour ✓` : 'À jour ✓';
+    const linked = autoLinkStravaActivities();
+    save('sessions'); renderSessions(); renderDash(); renderPlans(); renderToday();
+    btn.textContent = linked
+      ? `${linked} reliée${linked > 1 ? 's' : ''} au plan ✓`
+      : added ? `+${added} activités !` : updated ? `${updated} mises à jour ✓` : 'À jour ✓';
   } catch(e){ btn.textContent = 'Erreur'; }
   setTimeout(() => { btn.disabled=false; btn.innerHTML='<svg viewBox="0 0 24 24" fill="currentColor" width="13" height="13"><path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0l-7 13.828h4.169"/></svg> Sync Strava'; }, 2500);
 }
@@ -3406,6 +3409,48 @@ function planCandidatesForActivity(s){
   const undone = items.filter(item => !planSessionDone(plan, item));
   return (undone.length ? undone : items).slice(0, 18);
 }
+function activityPlanMatchScore(s, item){
+  const actualMin = Math.round(activityDurationSeconds(s) / 60);
+  const plannedMin = parseDurationToMinutes(item.duration);
+  const actualElev = Number(s.elev) || 0;
+  const plannedElev = parseElevMeters(item.elev);
+  const txt = `${item.title || ''} ${item.body || ''}`.toLowerCase();
+  const actTxt = `${s.type || ''} ${s.notes || ''}`.toLowerCase();
+  let score = 0;
+  if(plannedMin && actualMin){
+    const ratio = actualMin / plannedMin;
+    if(ratio >= .82 && ratio <= 1.22) score += 4;
+    else if(ratio >= .65 && ratio <= 1.45) score += 2;
+    else score -= 2;
+  }
+  if(plannedElev && actualElev){
+    const ratio = actualElev / plannedElev;
+    if(ratio >= .75 && ratio <= 1.3) score += 3;
+    else if(ratio >= .5 && ratio <= 1.7) score += 1;
+    else score -= 1;
+  }
+  const hard = /fraction|côte|seuil|tempo|rapide|soutenu/.test(txt);
+  const long = /longue|montagne|rando-course/.test(txt);
+  const recovery = /récup|recup|facile|footing/.test(txt);
+  if(long && (Number(s.km) >= 12 || Number(s.elev) >= 500 || activityDurationSeconds(s) >= 7200)) score += 2;
+  if(hard && (activityIntensity(s).level === 'moderate' || activityIntensity(s).level === 'hard')) score += 2;
+  if(recovery && activityIntensity(s).level === 'easy') score += 2;
+  if(actTxt.includes('hike') && long) score += 1;
+  if(item.index) score += Math.max(0, 1 - (Number(item.index) - 1) * .15);
+  return score;
+}
+function bestPlanMatchForActivity(s){
+  if(s.plan_match_key) return null;
+  const candidates = planCandidatesForActivity(s).slice(0, 10);
+  if(!candidates.length) return null;
+  const ranked = candidates
+    .map(item => ({ item, score:activityPlanMatchScore(s, item) }))
+    .sort((a,b) => b.score - a.score);
+  if(!ranked[0] || ranked[0].score < 5) return null;
+  if(ranked[1] && ranked[0].score - ranked[1].score < 1.25) return null;
+  const plan = DB.plans.find(p => p.id === ranked[0].item.planId);
+  return plan ? { plan, item:ranked[0].item, score:ranked[0].score } : null;
+}
 function compareActivityToPlan(s, item){
   const actualMin = Math.round(activityDurationSeconds(s) / 60);
   const plannedMin = parseDurationToMinutes(item.duration);
@@ -3464,6 +3509,7 @@ function activityMatchHtml(s){
     return `<div class="activity-section">
       <h3>Séance du plan associée</h3>
       <div style="font-size:13px;color:var(--text2);line-height:1.6">${escapeHtml(linked.plan.name)} · Semaine ${escapeHtml(linked.item.weekLabel || linked.item.week || '?')} · ${escapeHtml(linked.item.title)}</div>
+      ${s.plan_match?.auto ? `<div class="raw-chip" style="margin-top:8px;display:inline-flex">Association automatique</div>` : ''}
       <div class="match-verdict"><strong>${escapeHtml(verdict.label)}</strong><br>${escapeHtml(verdict.deltas)}<br>${escapeHtml(verdict.advice)}</div>
       ${linked.plan.data?.adaptation && !linked.plan.data.adaptation.dismissed ? `<div class="adapt-card" style="margin-top:10px;margin-bottom:0"><strong>${escapeHtml(linked.plan.data.adaptation.title)}</strong><br>${escapeHtml(linked.plan.data.adaptation.nextAction)}<div class="adapt-actions"><button class="btn btn-p btn-sm" onclick="applyAdaptation(${linked.plan.id})">Appliquer à la prochaine séance</button></div></div>` : ''}
       <button class="btn btn-g btn-sm" style="margin-top:10px" onclick="unlinkActivityPlan('${jsStringArg(s.id)}')">Dissocier</button>
@@ -3583,16 +3629,9 @@ function updateActivityNotes(id, value){
   s.notes_user = value;
   save('sessions');
 }
-function linkActivityToPlan(sessionId){
-  const s = DB.sessions.find(x => String(x.id) === String(sessionId));
-  const select = document.getElementById(`match-${sessionId}`);
-  if(!s || !select?.value) return;
-  const found = findPlanItemByKey(select.value);
-  if(!found) return;
-  const { plan, item } = found;
-  const verdict = compareActivityToPlan(s, item);
+function applyActivityPlanLink(s, plan, item, verdict, auto=false){
   createStravaAdaptation(plan, verdict, s, item);
-  s.plan_match_key = select.value;
+  s.plan_match_key = planItemKey(item);
   s.plan_match = {
     planId: plan.id,
     planName: plan.name,
@@ -3600,6 +3639,7 @@ function linkActivityToPlan(sessionId){
     weekLabel: item.weekLabel,
     title: item.title,
     verdict: verdict.label,
+    auto,
     linkedAt: new Date().toISOString()
   };
   if(item.raw){
@@ -3615,7 +3655,7 @@ function linkActivityToPlan(sessionId){
         elev:s.elev || '',
         feeling: verdict.label,
         fatigue: verdict.label === 'Plus dur que prévu' ? 'Élevée' : 'Normale',
-        notes:`Associée à Strava: ${s.notes || s.type || 'activité'} · ${verdict.deltas}. ${verdict.advice}`,
+        notes:`${auto ? 'Association automatique' : 'Associée'} à Strava: ${s.notes || s.type || 'activité'} · ${verdict.deltas}. ${verdict.advice}`,
         stravaSessionId:s.id
       });
     }
@@ -3625,10 +3665,38 @@ function linkActivityToPlan(sessionId){
       ps.done = true;
       ps.doneAt = new Date().toISOString();
       ps.stravaSessionId = s.id;
-      ps.feedback = `${verdict.label} · ${verdict.deltas}. ${verdict.advice}`;
+      ps.feedback = `${auto ? 'Auto: ' : ''}${verdict.label} · ${verdict.deltas}. ${verdict.advice}`;
       ps.feeling = verdict.label === 'Plus dur que prévu' ? 'Trop dur' : verdict.label === 'Plus léger que prévu' ? 'Très facile' : 'Bien';
     }
   }
+}
+function autoLinkStravaActivities(){
+  let linked = 0;
+  const activities = [...DB.sessions]
+    .filter(s => s.source === 'strava' && !s.plan_match_key)
+    .sort((a,b) => new Date(a.date || 0) - new Date(b.date || 0));
+  for(const s of activities){
+    const found = bestPlanMatchForActivity(s);
+    if(!found) continue;
+    const verdict = compareActivityToPlan(s, found.item);
+    applyActivityPlanLink(s, found.plan, found.item, verdict, true);
+    linked++;
+  }
+  if(linked){
+    save('sessions');
+    save('plans');
+  }
+  return linked;
+}
+function linkActivityToPlan(sessionId){
+  const s = DB.sessions.find(x => String(x.id) === String(sessionId));
+  const select = document.getElementById(`match-${sessionId}`);
+  if(!s || !select?.value) return;
+  const found = findPlanItemByKey(select.value);
+  if(!found) return;
+  const { plan, item } = found;
+  const verdict = compareActivityToPlan(s, item);
+  applyActivityPlanLink(s, plan, item, verdict, false);
   save('sessions');
   save('plans');
   renderActivityDetail(s, false);
