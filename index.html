@@ -322,6 +322,14 @@ select.fi{cursor:pointer}
 .today-body{font-size:14px;line-height:1.75;color:var(--text2);background:var(--bg2);border:1px solid var(--border);border-radius:var(--rs);padding:14px}
 .today-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
 .today-note{margin-top:10px}
+.feedback-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.feedback-grid .wide{grid-column:1/-1}
+.feedback-preview{margin-top:12px;background:var(--gb);border:1px solid var(--gbr);border-radius:12px;padding:12px;font-size:13px;color:var(--text2);line-height:1.55}
+.feedback-preview strong{display:block;color:var(--g);margin-bottom:3px}
+.feedback-preview.warn{background:var(--ab);border-color:rgba(245,200,66,.28)}
+.feedback-preview.warn strong{color:var(--amber)}
+.feedback-preview.danger{background:rgba(255,107,107,.10);border-color:rgba(255,107,107,.28)}
+.feedback-preview.danger strong{color:var(--red)}
 .week-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:14px;margin-bottom:14px}
 .week-board{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:16px}
 .week-title{font-family:'Syne',sans-serif;font-size:20px;font-weight:800;margin-bottom:5px}
@@ -436,6 +444,8 @@ select.fi{cursor:pointer}
   .week-grid{grid-template-columns:1fr}
   .week-metrics{grid-template-columns:repeat(2,1fr)}
   .today-actions{grid-template-columns:1fr}
+  .feedback-grid{grid-template-columns:1fr}
+  .feedback-grid .wide{grid-column:auto}
   .today-title{font-size:20px}
   .modal-footer{position:sticky;bottom:-18px;background:var(--bg2);padding-top:12px;flex-wrap:wrap}
   .modal-footer .btn{flex:1;justify-content:center}
@@ -699,6 +709,30 @@ select.fi{cursor:pointer}
   </div>
 </div>
 
+<!-- MODAL FEEDBACK -->
+<div class="overlay" id="modal-feedback" onclick="if(event.target===this)closeModal('modal-feedback')">
+  <div class="modal">
+    <div class="modal-hd">
+      <div class="modal-title" id="fb-title">Retour séance</div>
+      <button class="modal-close" onclick="closeModal('modal-feedback')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <div class="feedback-grid">
+      <div class="fg"><label class="fl">Ressenti global</label><select class="fi" id="fb-feeling" onchange="updateFeedbackPreview()"><option>Bien</option><option>Très facile</option><option>Dur mais propre</option><option>Trop dur</option><option>Douleur / alerte</option></select></div>
+      <div class="fg"><label class="fl">Jambes</label><select class="fi" id="fb-legs" onchange="updateFeedbackPreview()"><option>Normales</option><option>Fraîches</option><option>Lourdes</option><option>Cramées</option></select></div>
+      <div class="fg"><label class="fl">Souffle</label><select class="fi" id="fb-breath" onchange="updateFeedbackPreview()"><option>Contrôlé</option><option>Facile</option><option>Limite</option></select></div>
+      <div class="fg"><label class="fl">Douleur</label><select class="fi" id="fb-pain" onchange="updateFeedbackPreview()"><option>Non</option><option>Légère</option><option>Alerte</option></select></div>
+      <div class="fg"><label class="fl">Sommeil</label><select class="fi" id="fb-sleep" onchange="updateFeedbackPreview()"><option>Moyen</option><option>Bon</option><option>Mauvais</option></select></div>
+      <div class="fg"><label class="fl">Nutrition</label><select class="fi" id="fb-nutrition" onchange="updateFeedbackPreview()"><option>OK</option><option>Insuffisante</option><option>Problème digestif</option></select></div>
+      <div class="fg wide"><label class="fl">Note libre</label><textarea class="fi" id="fb-note" placeholder="Ex. jambes lourdes en descente, souffle facile, douleur genou gauche, pas assez mangé..." oninput="updateFeedbackPreview()"></textarea></div>
+    </div>
+    <div class="feedback-preview" id="fb-preview"><strong>Séance validée</strong>Le coach garde le plan si la récupération reste bonne.</div>
+    <div class="modal-footer">
+      <button class="btn btn-g" onclick="closeModal('modal-feedback')">Annuler</button>
+      <button class="btn btn-p" onclick="submitSessionFeedback()">Valider séance</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL ACTIVITY DETAIL -->
 <div class="overlay" id="modal-activity" onclick="if(event.target===this)closeModal('modal-activity')">
   <div class="modal modal-wide activity-modal">
@@ -784,6 +818,7 @@ let cloudTimer = null;
 let cloudStatus = 'local';
 let cloudError = '';
 let lastCloudRefresh = 0;
+let pendingFeedbackTarget = null;
 const NETLIFY_ORIGIN = 'https://trailmate-v2.netlify.app';
 const CLOUD_SYNC_ORIGIN = (location.protocol === 'file:' || location.hostname === '127.0.0.1' || location.hostname === 'localhost')
   ? NETLIFY_ORIGIN
@@ -2268,21 +2303,138 @@ function latestAdaptation(plan){
   return ageHours <= 96 ? a : null;
 }
 
-function createAdaptation(plan, status, note, item){
-  if(!plan?.data || !['Trop dur','Ratée','Douleur / alerte'].includes(status)) return;
-  const hard = status === 'Trop dur';
+function feedbackValues(){
+  return {
+    feeling: document.getElementById('fb-feeling')?.value || 'Bien',
+    legs: document.getElementById('fb-legs')?.value || 'Normales',
+    breath: document.getElementById('fb-breath')?.value || 'Contrôlé',
+    pain: document.getElementById('fb-pain')?.value || 'Non',
+    sleep: document.getElementById('fb-sleep')?.value || 'Moyen',
+    nutrition: document.getElementById('fb-nutrition')?.value || 'OK',
+    note: document.getElementById('fb-note')?.value || ''
+  };
+}
+
+function feedbackSummary(feedback = {}){
+  const parts = [
+    feedback.feeling,
+    feedback.legs ? `jambes ${feedback.legs}` : '',
+    feedback.breath ? `souffle ${feedback.breath}` : '',
+    feedback.pain && feedback.pain !== 'Non' ? `douleur ${feedback.pain}` : '',
+    feedback.sleep ? `sommeil ${feedback.sleep}` : '',
+    feedback.nutrition ? `nutrition ${feedback.nutrition}` : '',
+    feedback.note
+  ];
+  return parts.filter(Boolean).join(' · ');
+}
+
+function feedbackDecision(feedback = {}, status = 'Fait'){
+  const feeling = feedback.feeling || status;
+  const painAlert = feeling === 'Douleur / alerte' || feedback.pain === 'Alerte';
+  const tooHard = status === 'Trop dur' || feeling === 'Trop dur' || feedback.legs === 'Cramées' || feedback.breath === 'Limite';
+  const fatigue = feedback.legs === 'Lourdes' || feedback.sleep === 'Mauvais' || feedback.nutrition === 'Insuffisante' || feedback.nutrition === 'Problème digestif';
+  if(status === 'Ratée'){
+    return {
+      status:'Ratée',
+      kind:'keep_plan',
+      level:'warn',
+      title:'Séance ratée',
+      advice:'Ne compense pas. Reprends avec la prochaine séance facile ou allège si la fatigue est encore présente.',
+      nextAction:'Objectif prochain entraînement: retrouver de la régularité sans ajouter de volume.'
+    };
+  }
+  if(painAlert){
+    return {
+      status:'Douleur / alerte',
+      kind:'lighten_next',
+      level:'danger',
+      title:'Alerte douleur',
+      advice:'La séance est faite, mais la priorité devient la prévention blessure. La prochaine séance doit être très facile ou remplacée par repos/mobilité.',
+      nextAction:'Action proposée: supprimer l’intensité, réduire de 40%, arrêter si la douleur revient.'
+    };
+  }
+  if(tooHard){
+    return {
+      status:'Trop dur',
+      kind:'lighten_next',
+      level:'warn',
+      title:'Séance faite mais trop coûteuse',
+      advice:'On valide la séance, puis on protège la suite. La prochaine séance doit absorber la charge au lieu d’empiler de la fatigue.',
+      nextAction:'Action proposée: réduire la prochaine séance de 25 à 35%, rester en aisance respiratoire.'
+    };
+  }
+  if(fatigue){
+    return {
+      status:'Fatigue à surveiller',
+      kind:'keep_plan',
+      level:'warn',
+      title:'Séance faite, récupération à surveiller',
+      advice:'Le plan reste cohérent, mais évite de forcer si les jambes ou le sommeil ne reviennent pas vite.',
+      nextAction:'Action proposée: garder la prochaine séance facile, RPE 3-4/10, nutrition propre.'
+    };
+  }
+  return {
+    status:'Fait',
+    kind:'keep_plan',
+    level:'ok',
+    title:'Séance validée',
+    advice:'La charge semble acceptable. Le coach garde la progression prévue.',
+    nextAction:'Action proposée: continuer le plan si les sensations restent bonnes demain.'
+  };
+}
+
+function updateFeedbackPreview(){
+  const el = document.getElementById('fb-preview');
+  if(!el) return;
+  const decision = feedbackDecision(feedbackValues(), pendingFeedbackTarget?.status || 'Fait');
+  el.className = `feedback-preview ${decision.level === 'danger' ? 'danger' : decision.level === 'warn' ? 'warn' : ''}`;
+  el.innerHTML = `<strong>${escapeHtml(decision.title)}</strong>${escapeHtml(decision.advice)}`;
+}
+
+function openSessionFeedback(scope, status = 'Fait', planId = null, weekIndex = null, sessionIndex = null){
+  pendingFeedbackTarget = { scope, status, planId, weekIndex, sessionIndex };
+  const title = status === 'Ratée' ? 'Pourquoi la séance est ratée ?' : `Retour séance · ${status}`;
+  document.getElementById('fb-title').textContent = title;
+  const defaults = {
+    'fb-feeling': status === 'Trop dur' ? 'Trop dur' : status === 'Ratée' ? 'Dur mais propre' : 'Bien',
+    'fb-legs': 'Normales',
+    'fb-breath': 'Contrôlé',
+    'fb-pain': 'Non',
+    'fb-sleep': 'Moyen',
+    'fb-nutrition': 'OK',
+    'fb-note': document.getElementById('today-note')?.value || ''
+  };
+  Object.entries(defaults).forEach(([id,value]) => {
+    const el = document.getElementById(id);
+    if(el) el.value = value;
+  });
+  updateFeedbackPreview();
+  openModal('modal-feedback');
+}
+
+function submitSessionFeedback(){
+  if(!pendingFeedbackTarget) return;
+  const target = pendingFeedbackTarget;
+  const feedback = feedbackValues();
+  closeModal('modal-feedback');
+  pendingFeedbackTarget = null;
+  if(target.scope === 'plan') copyPlanSessionToDone(target.planId, target.weekIndex, target.sessionIndex, feedback, target.status);
+  else completeTodaySession(target.status, feedback);
+}
+
+function createAdaptation(plan, status, note, item, feedback = {}){
+  if(!plan?.data) return;
+  const decision = feedbackDecision(feedback, status);
+  if(!['Trop dur','Ratée','Douleur / alerte','Fatigue à surveiller'].includes(decision.status)) return;
   plan.data.adaptation = {
     createdAt: new Date().toISOString(),
-    status,
+    status: decision.status,
+    kind: decision.kind,
     source: item?.title || 'Séance du jour',
-    note: note || '',
-    title: hard ? 'Séance trop dure: prochaine séance allégée' : 'Séance ratée: reprise progressive',
-    advice: hard
-      ? 'Réduis la prochaine séance de 25 à 35%, reste en aisance respiratoire, supprime les blocs intenses si les jambes sont lourdes.'
-      : 'Ne compense pas la séance ratée. Reprends avec une séance facile, puis reviens au plan si les sensations sont bonnes.',
-    nextAction: hard
-      ? 'Objectif prochain entraînement: finir frais, RPE 3-4/10, aucune douleur.'
-      : 'Objectif prochain entraînement: retrouver du rythme sans ajouter de volume.'
+    note: feedbackSummary(feedback) || note || '',
+    title: decision.title,
+    advice: decision.advice,
+    nextAction: decision.nextAction
   };
 }
 function createStravaAdaptation(plan, verdict, activity, item){
@@ -2434,9 +2586,9 @@ function renderToday(){
     <div class="today-body">${inlinePlanHtml(item.body || 'Séance à réaliser en aisance, selon sensations.')}</div>
     <textarea class="fi today-note" id="today-note" placeholder="Ressenti après séance : jambes, souffle, douleur, météo, nutrition..."></textarea>
     <div class="today-actions">
-      <button class="btn btn-p" onclick="completeTodaySession('Fait')">Fait</button>
-      <button class="btn btn-g" onclick="completeTodaySession('Trop dur')">Trop dur</button>
-      <button class="btn btn-d" onclick="completeTodaySession('Ratée')">Ratée</button>
+      <button class="btn btn-p" onclick="openSessionFeedback('today','Fait')">Fait</button>
+      <button class="btn btn-g" onclick="openSessionFeedback('today','Trop dur')">Trop dur</button>
+      <button class="btn btn-d" onclick="openSessionFeedback('today','Ratée')">Ratée</button>
     </div>
   </div>
   <div class="card">
@@ -2445,11 +2597,12 @@ function renderToday(){
   </div>`;
 }
 
-function completeTodaySession(status){
+function completeTodaySession(status, feedback = {}){
   const plan = DB.plans[DB.plans.length - 1];
   const item = getTodayPlanSession();
   if(!plan || !item) return;
-  const note = document.getElementById('today-note')?.value || '';
+  const note = feedback.note || document.getElementById('today-note')?.value || '';
+  const decision = feedbackDecision(feedback, status);
   const isCompleted = status !== 'Ratée';
   if(item.raw){
     plan.data.rawLogs = plan.data.rawLogs || [];
@@ -2461,12 +2614,14 @@ function completeTodaySession(status){
       date: tod(),
       duration: item.duration,
       elev: item.elev,
-      feeling: status === 'Fait' ? 'Bien' : status,
-      fatigue: status === 'Trop dur' ? 'Élevée' : 'Normale',
-      notes: note
+      feeling: feedback.feeling || (status === 'Fait' ? 'Bien' : status),
+      fatigue: feedback.legs || (status === 'Trop dur' ? 'Élevée' : 'Normale'),
+      notes: note,
+      quickFeedback: feedback,
+      coachDecision: decision.status
     });
     if(isCompleted){
-      DB.sessions.push({ id:Date.now()+1, plan_id:plan.id, type:item.title, date:tod(), km:0, dur:item.duration, elev:parseInt(item.elev)||0, hr:0, notes:note || item.body, feedback:`Séance du jour · ${status}`, source:'plan' });
+      DB.sessions.push({ id:Date.now()+1, plan_id:plan.id, type:item.title, date:tod(), km:0, dur:item.duration, elev:parseInt(item.elev)||0, hr:0, notes:note || item.body, feedback:`Séance du jour · ${decision.status} · ${feedbackSummary(feedback)}`, quickFeedback:feedback, source:'plan' });
       save('sessions');
     }
   } else {
@@ -2474,8 +2629,11 @@ function completeTodaySession(status){
     if(s){
       s.done = isCompleted;
       s.doneAt = new Date().toISOString();
-      s.feeling = status === 'Fait' ? 'Bien' : status;
+      s.feeling = feedback.feeling || (status === 'Fait' ? 'Bien' : status);
+      s.fatigue = feedback.legs || '';
       s.feedback = note;
+      s.quickFeedback = feedback;
+      s.coachDecision = decision.status;
       if(isCompleted){
         DB.sessions.push({
           id: Date.now() + 1,
@@ -2487,14 +2645,15 @@ function completeTodaySession(status){
           elev: Number(s.denivele_m)||parseInt(item.elev)||0,
           hr: 0,
           notes: note || s.description || '',
-          feedback: `${s.conseil || 'Séance du jour'} · ${status}`,
+          feedback: `${s.conseil || 'Séance du jour'} · ${decision.status} · ${feedbackSummary(feedback)}`,
+          quickFeedback: feedback,
           source: 'plan'
         });
         save('sessions');
       }
     }
   }
-  createAdaptation(plan, status, note, item);
+  createAdaptation(plan, status, note, item, feedback);
   save('plans');
   renderAll();
   go('today');
@@ -2619,10 +2778,11 @@ function viewPlan(id){
           </div>
           <div class="ps-feedback">
             <textarea class="fi" id="pf-${id}-${wi}-${si}" placeholder="Ressenti après séance : jambes, souffle, douleur, météo..." oninput="updatePlanFeedback(${id},${wi},${si},this.value)">${safeNote}</textarea>
-            <button class="btn ${s.done?'btn-g':'btn-p'} btn-sm" onclick="togglePlanSession(${id},${wi},${si})">${s.done?'Fait':'À faire'}</button>
+            <button class="btn ${s.done?'btn-g':'btn-p'} btn-sm" onclick="${s.done ? `togglePlanSession(${id},${wi},${si})` : `openSessionFeedback('plan','Fait',${id},${wi},${si})`}">${s.done?'Fait':'À faire'}</button>
           </div>
           <div class="ps-actions">
-            <button class="btn btn-g btn-sm" onclick="copyPlanSessionToDone(${id},${wi},${si})">Ajouter aux séances</button>
+            <button class="btn btn-g btn-sm" onclick="openSessionFeedback('plan','Fait',${id},${wi},${si})">Ajouter aux séances</button>
+            <button class="btn btn-g btn-sm" onclick="openSessionFeedback('plan','Trop dur',${id},${wi},${si})">Trop dur</button>
             ${s.doneAt ? `<span style="font-size:11px;color:var(--text3);align-self:center">Fait le ${new Date(s.doneAt).toLocaleDateString('fr')}</span>` : ''}
           </div>
         </div>
@@ -2666,6 +2826,7 @@ function planSessionItem(plan, weekIndex, sessionIndex){
 function sessionUnifiedCard(plan, weekIndex, sessionIndex){
   const s = plan?.data?.semaines?.[weekIndex]?.seances?.[sessionIndex];
   if(!s) return '';
+  const fb = s.quickFeedback || {};
   const activity = planSessionLinkedActivity(plan.id, s);
   const item = planSessionItem(plan, weekIndex, sessionIndex);
   const verdict = activity && item ? compareActivityToPlan(activity, item) : null;
@@ -2673,9 +2834,10 @@ function sessionUnifiedCard(plan, weekIndex, sessionIndex){
   const actualText = activity
     ? `${activity.dur || '-'} · ${activity.elev || 0} m+${activity.hr ? ` · ${activity.hr} bpm` : ''}`
     : 'Pas encore reliée à Strava ou ajoutée aux séances';
-  const feelingText = [s.feeling, s.fatigue ? `fatigue ${s.fatigue}` : '', s.feedback ? 'note ajoutée' : ''].filter(Boolean).join(' · ') || 'Ressenti manquant';
+  const feelingText = feedbackSummary(fb) || [s.feeling, s.fatigue ? `jambes ${s.fatigue}` : '', s.feedback ? 'note ajoutée' : ''].filter(Boolean).join(' · ') || 'Ressenti manquant';
   const verdictText = verdict ? `${verdict.label} · ${verdict.deltas}` : (s.done ? 'Séance validée, ajoute Strava/ressenti pour préciser.' : 'À juger après réalisation.');
-  const impactText = verdict ? verdict.advice : (s.done ? 'Garde la suite si récupération OK.' : 'Le coach décidera après ressenti ou activité Strava.');
+  const decision = s.coachDecision ? feedbackDecision(fb, s.coachDecision) : null;
+  const impactText = decision?.nextAction || (verdict ? verdict.advice : (s.done ? 'Garde la suite si récupération OK.' : 'Le coach décidera après ressenti ou activité Strava.'));
   return `<div class="session-brief">
     <div class="brief-cell ${s.done ? 'on' : ''}"><div class="brief-label">Prévu</div><div class="brief-value"><strong>${escapeHtml(s.duree || '-')}</strong><br>${escapeHtml(s.denivele_m ? `${s.denivele_m} m+` : 'D+ libre')}</div></div>
     <div class="brief-cell ${activity ? 'on' : 'warn'}"><div class="brief-label">Réalisé</div><div class="brief-value">${escapeHtml(actualText)}</div></div>
@@ -2743,11 +2905,13 @@ function updatePlanField(planId, weekIndex, sessionIndex, field, value){
   save('plans');
 }
 
-function copyPlanSessionToDone(planId, weekIndex, sessionIndex){
+function copyPlanSessionToDone(planId, weekIndex, sessionIndex, feedback = {}, status = 'Fait'){
   const p = DB.plans.find(x => x.id === planId);
   const s = p?.data?.semaines?.[weekIndex]?.seances?.[sessionIndex];
   if(!s) return;
   const today = tod();
+  const note = feedback.note || s.feedback || s.description || '';
+  const decision = feedbackDecision(feedback, status);
   DB.sessions.push({
     id: Date.now(),
     plan_id: planId,
@@ -2757,12 +2921,19 @@ function copyPlanSessionToDone(planId, weekIndex, sessionIndex){
     dur: s.duree || '',
     elev: Number(s.denivele_m)||0,
     hr: 0,
-    notes: s.feedback || s.description || '',
-    feedback: s.conseil || '',
+    notes: note,
+    feedback: `${s.conseil || ''} · ${decision.status} · ${feedbackSummary(feedback)}`.replace(/^ · /,''),
+    quickFeedback: feedback,
     source: 'plan'
   });
   s.done = true;
   s.doneAt = new Date().toISOString();
+  s.feeling = feedback.feeling || (status === 'Fait' ? 'Bien' : status);
+  s.fatigue = feedback.legs || '';
+  s.feedback = note;
+  s.quickFeedback = feedback;
+  s.coachDecision = decision.status;
+  createAdaptation(p, status, note, planSessionItem(p, weekIndex, sessionIndex), feedback);
   save('sessions');
   save('plans');
   renderPlans(); renderSessions(); renderDash(); viewPlan(planId);
