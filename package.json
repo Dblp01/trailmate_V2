@@ -7,6 +7,6 @@
   },
   "scripts": {
     "dev": "node local-server.js",
-    "check": "node --check local-server.js && node --check netlify/functions/claude.js && node --check netlify/functions/config.js && node --check netlify/functions/data.js && node --check netlify/functions/strava-token.js && node -e \"const fs=require('fs');const h=fs.readFileSync('index.html','utf8');const scripts=[...h.matchAll(/<script>([\\\\s\\\\S]*?)<\\\\/script>/g)].map(m=>m[1]).join('\\\\n');new Function(scripts);console.log('index script OK')\""
+    "check": "node --check local-server.js && node --check netlify/functions/claude.js && node --check netlify/functions/config.js && node --check netlify/functions/data.js && node --check netlify/functions/race-search.js && node --check netlify/functions/strava-token.js && node -e \"const fs=require('fs');const h=fs.readFileSync('index.html','utf8');const scripts=[...h.matchAll(/<script>([\\\\s\\\\S]*?)<\\\\/script>/g)].map(m=>m[1]).join('\\\\n');new Function(scripts);console.log('index script OK')\""
   }
 }

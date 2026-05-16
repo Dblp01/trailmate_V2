@@ -262,6 +262,15 @@ select.fi{cursor:pointer}
 .ri-info{flex:1;min-width:0}
 .ri-name{font-size:13px;font-weight:500;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
 .ri-det{font-size:11px;color:var(--text3);margin-top:2px}
+.race-search{background:linear-gradient(135deg,var(--gb),rgba(110,181,255,.035));border:1px solid var(--gbr)}
+.race-search-row{display:grid;grid-template-columns:1fr auto;gap:8px}
+.race-results{display:grid;gap:10px;margin-top:12px}
+.race-result{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:start;background:var(--bg3);border:1px solid var(--border);border-radius:14px;padding:12px}
+.race-result-name{font-size:14px;font-weight:800;color:var(--text);margin-bottom:5px}
+.race-result-meta{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:7px}
+.race-result-note{font-size:12px;color:var(--text3);line-height:1.5}
+.race-source{font-size:11px;color:var(--g);text-decoration:none}
+.race-source:hover{text-decoration:underline}
 
 /* PLAN VIEW */
 .plan-week{margin-bottom:12px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
@@ -452,6 +461,7 @@ select.fi{cursor:pointer}
   .page{padding:0}
   .page > .topbar + div{padding:14px!important}
   .mg,.g2,.fg2{grid-template-columns:1fr;gap:10px}
+  .race-search-row,.race-result{grid-template-columns:1fr}
   .flow-grid{grid-template-columns:1fr}
   .flow-next-title{font-size:16px}
   .flow-actions .btn{flex:1;justify-content:center}
@@ -672,8 +682,11 @@ select.fi{cursor:pointer}
     <!-- RACES -->
     <div id="p-races" class="page">
       <div class="topbar">
-        <div class="tb-left"><h1>Objectifs courses</h1><p>Ton calendrier de compétitions</p></div>
-        <div class="tb-right"><button class="btn btn-p btn-sm" onclick="openModal('modal-race')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>Ajouter</button></div>
+        <div class="tb-left"><h1>Objectifs courses</h1><p>Recherche ou ajoute ton calendrier</p></div>
+        <div class="tb-right">
+          <button class="btn btn-g btn-sm" onclick="document.getElementById('race-search-input')?.focus()">Rechercher</button>
+          <button class="btn btn-p btn-sm" onclick="openModal('modal-race')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>Ajouter</button>
+        </div>
       </div>
       <div style="padding:22px" id="races-list"></div>
     </div>
@@ -3259,6 +3272,83 @@ function saveRace(){
   document.getElementById('r-date').value = tod();
 }
 
+function raceSearchShell(){
+  return `<div class="card race-search">
+    <div class="ch"><div class="ct">Calendrier réel</div><button class="btn btn-g btn-sm" onclick="openModal('modal-race')">Ajout manuel</button></div>
+    <div class="race-search-row">
+      <input class="fi" id="race-search-input" placeholder="Ex. Oisans Trail 2026, UTMB, Marathon du Mont-Blanc..." onkeydown="if(event.key==='Enter')searchRaces()">
+      <button class="btn btn-p" id="race-search-btn" onclick="searchRaces()">Rechercher</button>
+    </div>
+    <div class="race-result-note" style="margin-top:8px">TrailMate cherche sur le web et propose les infos trouvées. Vérifie toujours le lien officiel avant inscription.</div>
+    <div class="race-results" id="race-search-results"></div>
+  </div>`;
+}
+
+async function searchRaces(){
+  const q = document.getElementById('race-search-input')?.value.trim();
+  const btn = document.getElementById('race-search-btn');
+  const box = document.getElementById('race-search-results');
+  if(!q || !box) return;
+  btn.disabled = true;
+  btn.textContent = 'Recherche...';
+  box.innerHTML = `<div class="race-result-note">Recherche des courses réelles en cours...</div>`;
+  try{
+    const res = await fetch(netlifyUrl('/.netlify/functions/race-search'), {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ query:q })
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error?.message || data.error || 'Recherche indisponible');
+    const races = data.races || [];
+    box.innerHTML = races.length ? races.map((race,idx) => raceResultHtml(race, idx)).join('') : `<div class="race-result-note">Aucun résultat fiable. Essaie avec le nom officiel + année.</div>`;
+    window.__raceSearchResults = races;
+  } catch(e){
+    box.innerHTML = `<div class="adapt-card"><strong>Recherche indisponible.</strong><br>${escapeHtml(e.message || 'Erreur réseau')}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Rechercher';
+  }
+}
+
+function raceResultHtml(race, idx){
+  const meta = [
+    race.date ? `<span class="raw-chip">${escapeHtml(race.date)}</span>` : '',
+    race.distance_km ? `<span class="raw-chip">${escapeHtml(String(race.distance_km))} km</span>` : '',
+    race.elevation_m ? `<span class="raw-chip">${escapeHtml(String(race.elevation_m))} m+</span>` : '',
+    race.location ? `<span class="raw-chip">${escapeHtml(race.location)}</span>` : ''
+  ].filter(Boolean).join('');
+  return `<div class="race-result">
+    <div>
+      <div class="race-result-name">${escapeHtml(race.name || 'Course')}</div>
+      <div class="race-result-meta">${meta || '<span class="raw-chip">infos à vérifier</span>'}</div>
+      <div class="race-result-note">${escapeHtml(race.note || 'Résultat web à vérifier avant inscription.')}</div>
+      ${race.url ? `<a class="race-source" href="${escapeHtml(race.url)}" target="_blank">Voir la source officielle</a>` : ''}
+    </div>
+    <button class="btn btn-p btn-sm" onclick="addRaceSearchResult(${idx})">Ajouter</button>
+  </div>`;
+}
+
+function addRaceSearchResult(idx){
+  const race = window.__raceSearchResults?.[idx];
+  if(!race) return;
+  const id = Date.now();
+  DB.races.push({
+    id,
+    name: race.name || 'Course',
+    date: race.date || tod(),
+    lieu: race.location || '',
+    km: parseFloat(race.distance_km)||0,
+    elev: parseInt(race.elevation_m)||0,
+    prio: 'A',
+    url: race.url || '',
+    source: 'web'
+  });
+  save('races');
+  renderRaces();
+  renderDash();
+}
+
 function deleteRace(id){
   if(!confirm('Supprimer cette course ?')) return;
   DB.races = DB.races.filter(r => r.id !== id);
@@ -3267,21 +3357,22 @@ function deleteRace(id){
 
 function renderRaces(){
   const el = document.getElementById('races-list');
+  const search = raceSearchShell();
   if(!DB.races.length){
-    el.innerHTML = `<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 9H4.5a2.5 2.5 0 010-5H6"/><path d="M18 9h1.5a2.5 2.5 0 000-5H18"/><path d="M4 22h16"/><path d="M18 2H6v7a6 6 0 0012 0V2z"/></svg><h3>Aucune course</h3><p>Ajoute tes objectifs courses</p></div>`;
+    el.innerHTML = `${search}<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 9H4.5a2.5 2.5 0 010-5H6"/><path d="M18 9h1.5a2.5 2.5 0 000-5H18"/><path d="M4 22h16"/><path d="M18 2H6v7a6 6 0 0012 0V2z"/></svg><h3>Aucune course</h3><p>Recherche une course officielle ou ajoute-la manuellement.</p></div>`;
     return;
   }
   const pt = { A:'tr_', B:'ta', C:'tgr' };
   const pl = { A:'Objectif A', B:'Objectif B', C:'Objectif C' };
   const sorted = [...DB.races].sort((a,b) => new Date(a.date)-new Date(b.date));
-  el.innerHTML = `<div class="card">${sorted.map(r => {
+  el.innerHTML = `${search}<div class="card">${sorted.map(r => {
     const d = new Date(r.date);
     const days = Math.ceil((d-new Date())/86400000);
     return `<div class="ri">
       <div class="ri-date"><div class="ri-day">${d.getDate()}</div><div class="ri-month">${d.toLocaleString('fr',{month:'short'})}</div></div>
       <div class="ri-info">
         <div class="ri-name">${r.name} <span class="tag ${pt[r.prio]||'tgr'}">${pl[r.prio]||r.prio}</span></div>
-        <div class="ri-det">${[r.km?r.km+'km':'',r.elev?r.elev+'m+':'',r.lieu].filter(Boolean).join(' · ')} — ${days>0?`<span style="color:var(--g)">Dans ${days} jours</span>`:'<span style="color:var(--text3)">Passée</span>'}</div>
+        <div class="ri-det">${[r.km?r.km+'km':'',r.elev?r.elev+'m+':'',r.lieu].filter(Boolean).join(' · ')} — ${days>0?`<span style="color:var(--g)">Dans ${days} jours</span>`:'<span style="color:var(--text3)">Passée</span>'}${r.url ? ` · <a class="race-source" href="${escapeHtml(r.url)}" target="_blank">site</a>` : ''}</div>
         <div class="pb"><div class="pf" style="width:${Math.max(3,Math.min(100,100-days/1.5))}%"></div></div>
       </div>
       <button class="btn btn-d btn-sm" onclick="deleteRace(${r.id})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M9 6V4h6v2"/></svg></button>
