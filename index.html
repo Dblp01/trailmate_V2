@@ -864,7 +864,7 @@ const PROFILES = {
 let activeProfile = localStorage.getItem('tm_active_profile') || 'dimitri';
 if(!PROFILES[activeProfile]) activeProfile = 'dimitri';
 
-let DB = { plans:[], sessions:[], races:[], briefs:[], deletedSessions:[] };
+let DB = { plans:[], sessions:[], races:[], briefs:[], deletedSessions:[], deletedRaces:[] };
 let chatHistory = [];
 let stravaToken = '';
 let stravaAthlete = null;
@@ -914,6 +914,7 @@ function loadProfile(){
     races: readJson('races', []),
     briefs: readJson('briefs', []),
     deletedSessions: readJson('deletedSessions', []),
+    deletedRaces: readJson('deletedRaces', []),
   };
   chatHistory = readJson('chat', []);
   stravaToken = localStorage.getItem(storageKey('strava_token')) || '';
@@ -1041,7 +1042,7 @@ function showApp(){
 function renderAll(){ renderDash(); renderToday(); renderPlans(); renderSessions(); renderRaces(); }
 
 function emptyCloudData(){
-  return { version:1, updatedAt:new Date().toISOString(), profiles:{ dimitri:{plans:[],sessions:[],races:[],briefs:[],deletedSessions:[]}, lonny:{plans:[],sessions:[],races:[],briefs:[],deletedSessions:[]} } };
+  return { version:1, updatedAt:new Date().toISOString(), profiles:{ dimitri:{plans:[],sessions:[],races:[],briefs:[],deletedSessions:[],deletedRaces:[]}, lonny:{plans:[],sessions:[],races:[],briefs:[],deletedSessions:[],deletedRaces:[]} } };
 }
 
 function cloudDataUrl(){
@@ -1049,23 +1050,24 @@ function cloudDataUrl(){
 }
 
 function profileSnapshot(id){
-  if(id === activeProfile) return { plans:DB.plans, sessions:DB.sessions, races:DB.races, briefs:DB.briefs, deletedSessions:DB.deletedSessions };
+  if(id === activeProfile) return { plans:DB.plans, sessions:DB.sessions, races:DB.races, briefs:DB.briefs, deletedSessions:DB.deletedSessions, deletedRaces:DB.deletedRaces };
   return {
     plans: JSON.parse(localStorage.getItem(`tm_${id}_plans`) || '[]'),
     sessions: JSON.parse(localStorage.getItem(`tm_${id}_sessions`) || '[]'),
     races: JSON.parse(localStorage.getItem(`tm_${id}_races`) || '[]'),
     briefs: JSON.parse(localStorage.getItem(`tm_${id}_briefs`) || '[]'),
-    deletedSessions: JSON.parse(localStorage.getItem(`tm_${id}_deletedSessions`) || '[]')
+    deletedSessions: JSON.parse(localStorage.getItem(`tm_${id}_deletedSessions`) || '[]'),
+    deletedRaces: JSON.parse(localStorage.getItem(`tm_${id}_deletedRaces`) || '[]')
   };
 }
 
 function saveProfileSnapshot(id, data){
-  ['plans','sessions','races','briefs','deletedSessions'].forEach(k => localStorage.setItem(`tm_${id}_${k}`, JSON.stringify(data?.[k] || [])));
+  ['plans','sessions','races','briefs','deletedSessions','deletedRaces'].forEach(k => localStorage.setItem(`tm_${id}_${k}`, JSON.stringify(data?.[k] || [])));
   if(id === activeProfile) loadProfile();
 }
 
 function hasProfileData(data){
-  return ['plans','sessions','races','briefs','deletedSessions'].some(k => (data?.[k] || []).length);
+  return ['plans','sessions','races','briefs','deletedSessions','deletedRaces'].some(k => (data?.[k] || []).length);
 }
 
 function mergeLists(localList=[], remoteList=[]){
@@ -1079,6 +1081,11 @@ function mergeLists(localList=[], remoteList=[]){
 }
 
 function normalizeDeletedSessions(list = []){
+  const values = list.map(x => typeof x === 'string' ? x : x?.key).filter(Boolean);
+  return [...new Set(values)];
+}
+
+function normalizeDeletedRaces(list = []){
   const values = list.map(x => typeof x === 'string' ? x : x?.key).filter(Boolean);
   return [...new Set(values)];
 }
@@ -1100,14 +1107,36 @@ function mergeSessions(localSessions = [], remoteSessions = [], deletedSessions 
   return mergeLists(localSessions, remoteSessions).filter(s => !isSessionDeleted(s, deletedSessions));
 }
 
+function raceDeleteKeys(race){
+  if(!race) return [];
+  const name = String(race.name || '').trim().toLowerCase();
+  const date = String(race.date || '').trim();
+  return [
+    race.id !== undefined && race.id !== null ? `id:${race.id}` : '',
+    race.url ? `url:${String(race.url).trim()}` : '',
+    name && date ? `race:${name}|${date}` : ''
+  ].filter(Boolean);
+}
+
+function isRaceDeleted(race, deletedList = DB.deletedRaces){
+  const deleted = new Set(normalizeDeletedRaces(deletedList));
+  return raceDeleteKeys(race).some(key => deleted.has(key));
+}
+
+function mergeRaces(localRaces = [], remoteRaces = [], deletedRaces = []){
+  return mergeLists(localRaces, remoteRaces).filter(r => !isRaceDeleted(r, deletedRaces));
+}
+
 function mergeProfileData(local={}, remote={}){
   const deletedSessions = normalizeDeletedSessions([...(local.deletedSessions || []), ...(remote.deletedSessions || [])]);
+  const deletedRaces = normalizeDeletedRaces([...(local.deletedRaces || []), ...(remote.deletedRaces || [])]);
   return {
     plans: mergeLists(local.plans, remote.plans),
     sessions: mergeSessions(local.sessions, remote.sessions, deletedSessions),
-    races: mergeLists(local.races, remote.races),
+    races: mergeRaces(local.races, remote.races, deletedRaces),
     briefs: mergeLists(local.briefs, remote.briefs),
-    deletedSessions
+    deletedSessions,
+    deletedRaces
   };
 }
 
@@ -3266,10 +3295,43 @@ function saveRace(){
   const elev = document.getElementById('r-elev').value;
   const prio = document.getElementById('r-prio').value;
   if(!name || !date){ alert('Remplis le nom et la date !'); return; }
-  DB.races.push({ id:Date.now(), name, date, lieu, km:parseFloat(km)||0, elev:parseInt(elev)||0, prio });
+  const race = { id:Date.now(), name, date, lieu, km:parseFloat(km)||0, elev:parseInt(elev)||0, prio };
+  addRaceToCalendar(race);
   save('races'); renderRaces(); renderDash(); closeModal('modal-race');
   ['r-name','r-lieu','r-km','r-elev'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('r-date').value = tod();
+  suggestPlanUpdateForRace(race);
+}
+
+function addRaceToCalendar(race){
+  DB.deletedRaces = normalizeDeletedRaces(DB.deletedRaces || []).filter(key => !raceDeleteKeys(race).includes(key));
+  localStorage.setItem(storageKey('deletedRaces'), JSON.stringify(DB.deletedRaces));
+  DB.races.push(race);
+}
+
+function suggestPlanUpdateForRace(race){
+  if(!race) return;
+  const hasPlan = DB.plans.length > 0;
+  const msg = hasPlan
+    ? `Course ajoutée : ${race.name}.\n\nTu veux mettre à jour ton programme avec cette nouvelle course ?`
+    : `Course ajoutée : ${race.name}.\n\nTu veux créer un plan pour cette course ?`;
+  if(!confirm(msg)) return;
+  prefillPlanFromRace(race, hasPlan);
+  openModal('modal-plan');
+}
+
+function prefillPlanFromRace(race, isUpdate = false){
+  const set = (id, value) => { const el = document.getElementById(id); if(el) el.value = value || ''; };
+  set('p-name', `${isUpdate ? 'Mise à jour' : 'Plan'} ${race.name || 'course'}`);
+  set('p-race', race.name || '');
+  set('p-date', race.date || tod());
+  set('p-dist', race.km || '');
+  set('p-elev', race.elev || '');
+  const current = DB.plans[DB.plans.length - 1];
+  set('p-goal', isUpdate
+    ? `Mettre à jour mon programme actuel avec cette nouvelle course cible.\nCourse: ${race.name}, ${race.km || '?'} km, ${race.elev || '?'} m+, le ${race.date || '?'}.\nGarder une progression réaliste selon mes séances Strava et mes ressentis. Ne pas repartir de zéro si le plan actuel est encore utile.`
+    : `Préparer cette course avec un plan réaliste et progressif.\nCourse: ${race.name}, ${race.km || '?'} km, ${race.elev || '?'} m+, le ${race.date || '?'}.\nAdapter au niveau réel, aux séances disponibles et à la récupération.`);
+  if(current?.dpw) set('p-days', current.dpw);
 }
 
 function raceSearchShell(){
@@ -3333,7 +3395,7 @@ function addRaceSearchResult(idx){
   const race = window.__raceSearchResults?.[idx];
   if(!race) return;
   const id = Date.now();
-  DB.races.push({
+  const item = {
     id,
     name: race.name || 'Course',
     date: race.date || tod(),
@@ -3343,16 +3405,23 @@ function addRaceSearchResult(idx){
     prio: 'A',
     url: race.url || '',
     source: 'web'
-  });
+  };
+  addRaceToCalendar(item);
   save('races');
   renderRaces();
   renderDash();
+  suggestPlanUpdateForRace(item);
 }
 
 function deleteRace(id){
   if(!confirm('Supprimer cette course ?')) return;
-  DB.races = DB.races.filter(r => r.id !== id);
-  save('races'); renderRaces(); renderDash();
+  const race = DB.races.find(r => String(r.id) === String(id));
+  DB.deletedRaces = normalizeDeletedRaces([...(DB.deletedRaces || []), ...raceDeleteKeys(race || { id })]);
+  localStorage.setItem(storageKey('deletedRaces'), JSON.stringify(DB.deletedRaces));
+  DB.races = DB.races.filter(r => String(r.id) !== String(id));
+  save('deletedRaces');
+  save('races');
+  renderRaces(); renderDash();
 }
 
 function renderRaces(){

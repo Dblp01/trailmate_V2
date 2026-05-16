@@ -15,8 +15,8 @@ const emptyData = () => ({
   version: 1,
   updatedAt: new Date().toISOString(),
   profiles: {
-    dimitri: { plans: [], sessions: [], races: [], briefs: [], deletedSessions: [] },
-    lonny: { plans: [], sessions: [], races: [], briefs: [], deletedSessions: [] }
+    dimitri: { plans: [], sessions: [], races: [], briefs: [], deletedSessions: [], deletedRaces: [] },
+    lonny: { plans: [], sessions: [], races: [], briefs: [], deletedSessions: [], deletedRaces: [] }
   }
 });
 
@@ -110,7 +110,8 @@ function normalize(data) {
       sessions: Array.isArray(p.sessions) ? p.sessions : [],
       races: Array.isArray(p.races) ? p.races : [],
       briefs: Array.isArray(p.briefs) ? p.briefs : [],
-      deletedSessions: Array.isArray(p.deletedSessions) ? p.deletedSessions : []
+      deletedSessions: Array.isArray(p.deletedSessions) ? p.deletedSessions : [],
+      deletedRaces: Array.isArray(p.deletedRaces) ? p.deletedRaces : []
     };
   }
   return base;
