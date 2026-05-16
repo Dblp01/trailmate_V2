@@ -808,7 +808,7 @@ const PROFILES = {
 let activeProfile = localStorage.getItem('tm_active_profile') || 'dimitri';
 if(!PROFILES[activeProfile]) activeProfile = 'dimitri';
 
-let DB = { plans:[], sessions:[], races:[], briefs:[] };
+let DB = { plans:[], sessions:[], races:[], briefs:[], deletedSessions:[] };
 let chatHistory = [];
 let stravaToken = '';
 let stravaAthlete = null;
@@ -857,6 +857,7 @@ function loadProfile(){
     sessions: readJson('sessions', []),
     races: readJson('races', []),
     briefs: readJson('briefs', []),
+    deletedSessions: readJson('deletedSessions', []),
   };
   chatHistory = readJson('chat', []);
   stravaToken = localStorage.getItem(storageKey('strava_token')) || '';
@@ -984,7 +985,7 @@ function showApp(){
 function renderAll(){ renderDash(); renderToday(); renderPlans(); renderSessions(); renderRaces(); }
 
 function emptyCloudData(){
-  return { version:1, updatedAt:new Date().toISOString(), profiles:{ dimitri:{plans:[],sessions:[],races:[],briefs:[]}, lonny:{plans:[],sessions:[],races:[],briefs:[]} } };
+  return { version:1, updatedAt:new Date().toISOString(), profiles:{ dimitri:{plans:[],sessions:[],races:[],briefs:[],deletedSessions:[]}, lonny:{plans:[],sessions:[],races:[],briefs:[],deletedSessions:[]} } };
 }
 
 function cloudDataUrl(){
@@ -992,22 +993,23 @@ function cloudDataUrl(){
 }
 
 function profileSnapshot(id){
-  if(id === activeProfile) return { plans:DB.plans, sessions:DB.sessions, races:DB.races, briefs:DB.briefs };
+  if(id === activeProfile) return { plans:DB.plans, sessions:DB.sessions, races:DB.races, briefs:DB.briefs, deletedSessions:DB.deletedSessions };
   return {
     plans: JSON.parse(localStorage.getItem(`tm_${id}_plans`) || '[]'),
     sessions: JSON.parse(localStorage.getItem(`tm_${id}_sessions`) || '[]'),
     races: JSON.parse(localStorage.getItem(`tm_${id}_races`) || '[]'),
-    briefs: JSON.parse(localStorage.getItem(`tm_${id}_briefs`) || '[]')
+    briefs: JSON.parse(localStorage.getItem(`tm_${id}_briefs`) || '[]'),
+    deletedSessions: JSON.parse(localStorage.getItem(`tm_${id}_deletedSessions`) || '[]')
   };
 }
 
 function saveProfileSnapshot(id, data){
-  ['plans','sessions','races','briefs'].forEach(k => localStorage.setItem(`tm_${id}_${k}`, JSON.stringify(data?.[k] || [])));
+  ['plans','sessions','races','briefs','deletedSessions'].forEach(k => localStorage.setItem(`tm_${id}_${k}`, JSON.stringify(data?.[k] || [])));
   if(id === activeProfile) loadProfile();
 }
 
 function hasProfileData(data){
-  return ['plans','sessions','races','briefs'].some(k => (data?.[k] || []).length);
+  return ['plans','sessions','races','briefs','deletedSessions'].some(k => (data?.[k] || []).length);
 }
 
 function mergeLists(localList=[], remoteList=[]){
@@ -1020,12 +1022,36 @@ function mergeLists(localList=[], remoteList=[]){
   return [...map.values()];
 }
 
+function normalizeDeletedSessions(list = []){
+  const values = list.map(x => typeof x === 'string' ? x : x?.key).filter(Boolean);
+  return [...new Set(values)];
+}
+
+function sessionDeleteKeys(session){
+  if(!session) return [];
+  return [
+    session.id !== undefined && session.id !== null ? `id:${session.id}` : '',
+    session.strava_id !== undefined && session.strava_id !== null ? `strava:${session.strava_id}` : ''
+  ].filter(Boolean);
+}
+
+function isSessionDeleted(session, deletedList = DB.deletedSessions){
+  const deleted = new Set(normalizeDeletedSessions(deletedList));
+  return sessionDeleteKeys(session).some(key => deleted.has(key));
+}
+
+function mergeSessions(localSessions = [], remoteSessions = [], deletedSessions = []){
+  return mergeLists(localSessions, remoteSessions).filter(s => !isSessionDeleted(s, deletedSessions));
+}
+
 function mergeProfileData(local={}, remote={}){
+  const deletedSessions = normalizeDeletedSessions([...(local.deletedSessions || []), ...(remote.deletedSessions || [])]);
   return {
     plans: mergeLists(local.plans, remote.plans),
-    sessions: mergeLists(local.sessions, remote.sessions),
+    sessions: mergeSessions(local.sessions, remote.sessions, deletedSessions),
     races: mergeLists(local.races, remote.races),
-    briefs: mergeLists(local.briefs, remote.briefs)
+    briefs: mergeLists(local.briefs, remote.briefs),
+    deletedSessions
   };
 }
 
@@ -3106,10 +3132,35 @@ async function saveSession(){
   }, 2500);
 }
 
+function rememberDeletedSession(session){
+  DB.deletedSessions = normalizeDeletedSessions([...(DB.deletedSessions || []), ...sessionDeleteKeys(session)]);
+  localStorage.setItem(storageKey('deletedSessions'), JSON.stringify(DB.deletedSessions));
+}
+
+function unlinkDeletedSession(session){
+  if(!session) return;
+  const sid = String(session.id);
+  DB.plans.forEach(plan => {
+    const data = plan.data || {};
+    if(Array.isArray(data.rawLogs)){
+      data.rawLogs = data.rawLogs.filter(log => String(log.stravaSessionId || '') !== sid);
+    }
+    (data.semaines || []).forEach(week => (week.seances || []).forEach(ps => {
+      if(String(ps.stravaSessionId || '') === sid) delete ps.stravaSessionId;
+    }));
+  });
+}
+
 function deleteSession(id){
   if(!confirm('Supprimer cette séance ?')) return;
-  DB.sessions = DB.sessions.filter(s => s.id !== id);
-  save('sessions'); renderSessions(); renderDash();
+  const session = DB.sessions.find(s => String(s.id) === String(id));
+  rememberDeletedSession(session || { id });
+  unlinkDeletedSession(session);
+  DB.sessions = DB.sessions.filter(s => String(s.id) !== String(id));
+  save('deletedSessions');
+  save('sessions');
+  save('plans');
+  renderSessions(); renderDash(); renderPlans(); renderToday();
 }
 
 function renderSessions(){
@@ -3565,6 +3616,7 @@ async function syncStrava(){
         feedback: '',
         source:   'strava'
       };
+      if(isSessionDeleted(payload)) continue;
       const existing = DB.sessions.find(s => String(s.strava_id) === String(a.id));
       if(existing){
         Object.assign(existing, { ...payload, id:existing.id, feedback:existing.feedback || '', notes_user:existing.notes_user || '' });
