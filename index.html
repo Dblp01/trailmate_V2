@@ -148,6 +148,21 @@ button,input,select,textarea{font-family:'DM Sans',sans-serif}
 .coach-action-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;margin-bottom:5px}
 .coach-action-text{font-size:13px;color:var(--text2);line-height:1.65}
 .coach-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.coach-verdict{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:15px}
+.coach-verdict.good{border-color:var(--gbr);background:linear-gradient(135deg,var(--gb),var(--bg2))}
+.coach-verdict.warn{border-color:rgba(245,200,66,.28);background:linear-gradient(135deg,var(--ab),var(--bg2))}
+.coach-verdict.hot{border-color:rgba(255,107,107,.28);background:linear-gradient(135deg,var(--rb),var(--bg2))}
+.coach-verdict-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
+.coach-verdict-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:800}
+.coach-verdict-sub{font-size:12px;color:var(--text3);line-height:1.5;margin-top:4px}
+.coach-verdict-pill{font-size:11px;font-weight:800;border-radius:999px;padding:6px 10px;color:var(--g);background:var(--gb);border:1px solid var(--gbr);white-space:nowrap}
+.coach-verdict.warn .coach-verdict-pill{color:var(--amber);background:var(--ab);border-color:rgba(245,200,66,.28)}
+.coach-verdict.hot .coach-verdict-pill{color:var(--red);background:var(--rb);border-color:rgba(255,107,107,.28)}
+.coach-verdict-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.coach-verdict-cell{background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:12px;padding:10px}
+.coach-verdict-label{font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin-bottom:5px}
+.coach-verdict-value{font-size:12px;color:var(--text2);line-height:1.45}
+.coach-verdict-value strong{color:var(--text);font-size:13px}
 .coach-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .coach-panel{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:15px}
 .coach-panel-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;margin-bottom:10px}
@@ -480,6 +495,7 @@ select.fi{cursor:pointer}
   .coach-hero-top{display:block}
   .coach-badge{display:inline-flex;margin-top:10px}
   .coach-title{font-size:23px}
+  .coach-verdict-grid{grid-template-columns:1fr 1fr}
   .coach-grid,.coach-secondary{grid-template-columns:1fr}
   .coach-actions .btn{flex:1;justify-content:center}
   .mc{padding:11px 12px}
@@ -3616,6 +3632,7 @@ function renderCoachHome(){
   const feedbackNeed = stats.done > stats.feedback;
   const completion = stats.total ? Math.round((stats.done / stats.total) * 100) : 0;
   const action = coachActionState(plan, next, adaptation, unlinked, feedbackNeed);
+  const verdict = latestPlanVerdict(plan);
   const days = race ? Math.ceil((new Date(race.date)-new Date())/86400000) : null;
   const weekRows = (week.items || []).slice(0,6).map((item,idx) => {
     const done = planSessionDone(plan, item);
@@ -3660,6 +3677,7 @@ function renderCoachHome(){
         <div class="coach-actions">${action.actions}</div>
       </div>
     </div>
+    ${coachVerdictHtml(verdict)}
     <div class="coach-grid">
       <div class="coach-panel">
         <div class="coach-panel-title">Aujourd’hui</div>
@@ -3702,6 +3720,78 @@ function unlinkedStravaSessions(){
   return DB.sessions
     .filter(s => s.source === 'strava' && !s.plan_match_key)
     .sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0));
+}
+
+function latestPlanVerdict(plan){
+  if(!plan) return null;
+  const linked = allPlanItems(plan)
+    .map(item => ({ item, actual:weekItemActual(plan, item) }))
+    .filter(x => x.actual)
+    .sort((a,b) => new Date(b.actual.date || 0) - new Date(a.actual.date || 0))[0];
+  if(linked){
+    const verdict = compareActivityToPlan(linked.actual, linked.item);
+    const intensity = activityIntensity(linked.actual);
+    const actualMin = Math.round(activityDurationSeconds(linked.actual) / 60);
+    const plannedMin = parseDurationToMinutes(linked.item.duration);
+    const actualElev = Number(linked.actual.elev) || 0;
+    const plannedElev = parseElevMeters(linked.item.elev);
+    const hot = verdict.label === 'Intense' || verdict.label === 'Plus dur que prévu';
+    const warn = hot || verdict.label === 'Plus léger que prévu';
+    return {
+      cls: hot ? 'hot' : warn ? 'warn' : 'good',
+      label: verdict.label,
+      title: linked.item.title || 'Dernière séance reliée',
+      subtitle: linked.actual.date || '',
+      planned: [linked.item.duration || '-', plannedElev ? `${plannedElev} m+` : 'D+ libre'].join(' · '),
+      actual: [actualMin ? minutesLabel(actualMin) : (linked.actual.dur || '-'), actualElev ? `${actualElev} m+` : 'D+ -', linked.actual.hr ? `${linked.actual.hr} bpm` : 'FC -'].join(' · '),
+      gap: verdict.deltas,
+      decision: verdict.advice,
+      action: intensity.level === 'easy'
+        ? 'Pas d’alerte cardio. Valide surtout avec jambes, douleurs et sommeil.'
+        : hot
+          ? 'Allège ou garde facile la prochaine séance si les jambes sont lourdes.'
+          : 'Tu peux garder la suite si la récupération est correcte.',
+      activityId: linked.actual.id
+    };
+  }
+  const rawLog = plan.data?.rawLogs?.[0];
+  if(rawLog){
+    const hard = /trop dur|douleur|élevée|très élevée/i.test(`${rawLog.status} ${rawLog.feeling} ${rawLog.fatigue} ${rawLog.notes}`);
+    return {
+      cls: hard ? 'warn' : 'good',
+      label: rawLog.status || 'Séance suivie',
+      title: rawLog.name || 'Dernière séance suivie',
+      subtitle: rawLog.date || '',
+      planned: [rawLog.duration || '-', rawLog.elev ? `${rawLog.elev} m+` : 'D+ libre'].join(' · '),
+      actual: [rawLog.duration || '-', rawLog.elev ? `${rawLog.elev} m+` : 'D+ libre', rawLog.feeling ? `ressenti ${rawLog.feeling}` : 'ressenti -'].join(' · '),
+      gap: 'Ajoute Strava pour calculer durée, D+ et FC réels.',
+      decision: hard ? 'Séance faite mais charge ressentie haute : priorité récupération.' : 'Séance validée. Le suivi devient plus précis avec Strava relié.',
+      action: hard ? 'Prochaine séance facile ou raccourcie si fatigue persistante.' : 'Garde la suite prévue si récupération OK.',
+      activityId: null
+    };
+  }
+  return null;
+}
+
+function coachVerdictHtml(verdict){
+  if(!verdict) return '';
+  return `<div class="coach-verdict ${verdict.cls}">
+    <div class="coach-verdict-head">
+      <div>
+        <div class="coach-verdict-title">${escapeHtml(verdict.title)}</div>
+        <div class="coach-verdict-sub">${escapeHtml(verdict.subtitle || 'Dernière séance analysée')}</div>
+      </div>
+      <div class="coach-verdict-pill">${escapeHtml(verdict.label)}</div>
+    </div>
+    <div class="coach-verdict-grid">
+      <div class="coach-verdict-cell"><div class="coach-verdict-label">Prévu</div><div class="coach-verdict-value"><strong>${escapeHtml(verdict.planned)}</strong></div></div>
+      <div class="coach-verdict-cell"><div class="coach-verdict-label">Réalisé</div><div class="coach-verdict-value"><strong>${escapeHtml(verdict.actual)}</strong></div></div>
+      <div class="coach-verdict-cell"><div class="coach-verdict-label">Écart</div><div class="coach-verdict-value">${escapeHtml(verdict.gap)}</div></div>
+      <div class="coach-verdict-cell"><div class="coach-verdict-label">Suite</div><div class="coach-verdict-value">${escapeHtml(verdict.action)}</div></div>
+    </div>
+    <div class="coach-action-text" style="margin-top:10px">${escapeHtml(verdict.decision)}</div>
+    ${verdict.activityId ? `<div class="coach-actions"><button class="btn btn-g btn-sm" onclick="openActivityDetail('${jsStringArg(verdict.activityId)}')">Voir l’activité</button><button class="btn btn-g btn-sm" onclick="go('today')">Voir la suite</button></div>` : ''}
+  </div>`;
 }
 
 function flowStepHtml(state, title, text){
