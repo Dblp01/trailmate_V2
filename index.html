@@ -276,15 +276,26 @@ select.fi{cursor:pointer}
 .plan-week{margin-bottom:12px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
 .pw-hd{padding:11px 15px;background:var(--bg3);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
 .pw-body{padding:12px;display:grid;grid-template-columns:1fr;gap:10px}
+.plan-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg2);flex-wrap:wrap}
+.plan-toolbar-title{font-size:13px;font-weight:800;color:var(--text)}
+.plan-toolbar-sub{font-size:11px;color:var(--text3);margin-top:2px}
+.plan-toolbar-actions{display:flex;gap:8px;flex-wrap:wrap}
 .ps{display:grid;grid-template-columns:42px 1fr;gap:11px;align-items:flex-start;padding:12px;background:var(--bg3);border-radius:var(--r);border:1px solid var(--border)}
 .ps.done{opacity:.72;border-color:var(--gbr);background:linear-gradient(135deg,var(--gb),var(--bg3))}
+.ps.simple{padding:13px;border-color:rgba(255,255,255,.09)}
+.ps.simple.openish{border-color:rgba(169,238,91,.28);background:linear-gradient(135deg,rgba(169,238,91,.07),var(--bg3))}
 .ps-icon{width:42px;height:42px;border-radius:var(--rs);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
 .ps-body{flex:1;min-width:0}
 .ps-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}
 .ps-day{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;min-width:28px}
 .ps-type{font-size:13px;font-weight:600}
 .ps-zone{font-size:10px;font-weight:600;color:var(--text3);background:var(--bg4);border:1px solid var(--border);padding:1px 7px;border-radius:20px}
+.ps-status{margin-left:auto;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);border:1px solid var(--border);background:var(--bg2);border-radius:999px;padding:4px 8px}
+.ps-status.done{color:var(--g);border-color:var(--gbr);background:var(--gb)}
 .ps-stats{margin-left:auto;display:flex;gap:8px;font-size:11px;color:var(--text3);flex-wrap:wrap}
+.ps-chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
+.ps-chip{font-size:12px;font-weight:700;color:var(--g);background:var(--gb);border:1px solid var(--gbr);border-radius:999px;padding:5px 9px}
+.ps-objective{font-size:12px;color:var(--text2);line-height:1.55;margin-top:9px}
 .ps-desc{font-size:12px;color:var(--text2);line-height:1.6;margin-top:7px;padding:9px 10px;background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:var(--rs)}
 .ps-conseil{font-size:12px;color:var(--g);margin-top:8px;line-height:1.55;padding:9px 10px;background:var(--gb);border:1px solid var(--gbr);border-radius:var(--rs)}
 .ps-detail{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:9px}
@@ -294,6 +305,7 @@ select.fi{cursor:pointer}
 .ps-feedback{margin-top:9px;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end}
 .ps-feedback textarea{min-height:44px;font-size:12px}
 .ps-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.ps-actions.compact{align-items:center;margin-top:10px}
 .ps-toggle{background:transparent;border:none;color:var(--g);font-size:12px;font-weight:600;cursor:pointer;padding:0;margin-top:8px}
 .ps-extra{display:none;margin-top:9px;padding-top:9px;border-top:1px solid var(--border)}
 .ps-extra.on{display:block}
@@ -331,8 +343,8 @@ select.fi{cursor:pointer}
 .raw-session-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
 .raw-chip{font-size:11px;color:var(--g);background:var(--gb);border:1px solid var(--gbr);border-radius:999px;padding:3px 8px;font-weight:700;white-space:nowrap}
 .raw-session-actions{display:flex;gap:7px;align-items:center;flex-shrink:0}
-.raw-open{width:28px;height:28px;border-radius:50%;border:1px solid var(--border);display:grid;place-items:center;color:var(--text3);font-size:14px;transition:transform .15s}
-.raw-session.open .raw-open{transform:rotate(90deg);color:var(--g);border-color:var(--gbr)}
+.raw-open{min-width:62px;height:30px;border-radius:999px;border:1px solid var(--border);display:grid;place-items:center;color:var(--text3);font-size:11px;font-weight:800;background:transparent;cursor:pointer}
+.raw-session.open .raw-open{color:var(--g);border-color:var(--gbr);background:var(--gb)}
 .raw-session-body{display:none;font-size:13px;line-height:1.7;color:var(--text2);margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
 .raw-session.open .raw-session-body{display:block}
 .raw-session-preview{font-size:12px;color:var(--text2);line-height:1.55;margin-top:8px}
@@ -1245,6 +1257,15 @@ function escapeAttr(str){
   return escapeHtml(str).replace(/\n/g, ' ');
 }
 
+function plainText(value){
+  return String(value || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function shortText(value, max = 150){
+  const txt = plainText(value);
+  return txt.length > max ? `${txt.slice(0, max - 1).trim()}…` : txt;
+}
+
 function inlinePlanHtml(text){
   return escapeHtml(text)
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
@@ -1413,7 +1434,7 @@ function formatStructuredRawPlan(text, planId){
       const icon = rawSessionIcon(cleanTitle, sessionBody);
       const preview = rawSessionPreview(sessionBody);
       const subTitle = rawSessionSubTitle(cleanTitle, sessionBody);
-      const open = idx === 0 && sidx === 0 ? ' open' : '';
+      const open = '';
       const detailId = `raw-session-${planId || 'x'}-${idx}-${sidx}`;
       return `<article class="raw-session${open}" id="${detailId}" onclick="toggleRawSession('${detailId}')">
         <div class="raw-session-top">
@@ -1428,7 +1449,7 @@ function formatStructuredRawPlan(text, planId){
           </div>
           <div class="raw-session-actions">
             ${planId ? `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();prefillRawPlanLog(${planId},'${encodeURIComponent(week.label)}','${encodeURIComponent(cleanTitle)}','${encodeURIComponent(meta.duration || '')}','${encodeURIComponent(meta.elev || '')}')">Suivre</button>` : ''}
-            <span class="raw-open">›</span>
+            <button class="raw-open" type="button">Détail</button>
           </div>
         </div>
         <div class="raw-session-body">${workoutBlocksHtml(sessionBody) || inlinePlanHtml(sessionBody)}</div>
@@ -2793,6 +2814,16 @@ function viewPlan(id){
       ${l.notes ? `<div class="ps-desc">${escapeHtml(l.notes).replace(/\n/g,'<br>')}</div>` : ''}
     </div>`).join('') : `<div style="font-size:12px;color:var(--text3);padding:8px 0">Aucune séance suivie pour ce plan.</div>`;
     document.getElementById('pv-content').innerHTML = `
+      <div class="plan-toolbar">
+        <div>
+          <div class="plan-toolbar-title">Plan actif</div>
+          <div class="plan-toolbar-sub">Chaque séance est séparée. Ouvre seulement le détail dont tu as besoin.</div>
+        </div>
+        <div class="plan-toolbar-actions">
+          <button class="btn btn-g btn-sm" onclick="closeModal('modal-pv');go('today')">Aujourd'hui</button>
+          <button class="btn btn-g btn-sm" onclick="closeModal('modal-pv');go('objectives')">Objectifs</button>
+        </div>
+      </div>
       <div style="font-size:12px;color:var(--g);line-height:1.6;padding:10px 12px;background:var(--gb);border:1px solid var(--gbr);border-radius:var(--r);margin-bottom:12px">Plan texte généré directement par ChatGPT. Priorité aux durées, D+ et contenu spécifique.</div>
       <div class="raw-plan">${formatRawPlan(d.rawText, id)}</div>
       <div class="raw-follow">
@@ -2819,6 +2850,16 @@ function viewPlan(id){
   }
 
   let html = `${p.fallback || p.partialFallback ? `<div style="font-size:12px;color:var(--amber);line-height:1.6;padding:10px 12px;background:var(--ab);border:1px solid rgba(245,200,66,.22);border-radius:var(--r);margin-bottom:10px">Certaines semaines ont été construites en secours expert car l'IA a renvoyé un JSON incomplet. Utilise "Régénérer" sur une semaine pour demander une version IA complète.</div>` : ''}
+  <div class="plan-toolbar">
+    <div>
+      <div class="plan-toolbar-title">Plan actif</div>
+      <div class="plan-toolbar-sub">Vue simple : séance, durée, D+ et action. Le reste reste dans Détail.</div>
+    </div>
+    <div class="plan-toolbar-actions">
+      <button class="btn btn-g btn-sm" onclick="closeModal('modal-pv');go('today')">Aujourd'hui</button>
+      <button class="btn btn-g btn-sm" onclick="closeModal('modal-pv');go('objectives')">Objectifs</button>
+    </div>
+  </div>
   <div style="font-size:13px;color:var(--text2);line-height:1.7;padding:13px 15px;background:var(--gb);border:1px solid var(--gbr);border-radius:var(--r);margin-bottom:14px">${d.resume||''}</div>`;
 
   if(d.phases?.length){
@@ -2855,14 +2896,29 @@ function viewPlan(id){
       const safeNote = String(s.feedback || '').replace(/"/g,'&quot;');
       const steps = sessionSteps(s);
       const extraId = `pex-${id}-${wi}-${si}`;
-      html += `<div class="ps ${s.done?'done':''}">
+      const mainText = shortText(s.objectif || s.description || s.conseil || 'Séance structurée du plan', 165);
+      html += `<div class="ps simple ${s.done?'done':''}">
         <div class="ps-icon" style="background:${st.bg};border:1px solid ${st.border}">${st.icon}</div>
         <div class="ps-body">
           <div class="ps-top">
             <span class="ps-day">${s.jour||''}</span>
             <span class="ps-type" style="color:${st.color};${s.done?'text-decoration:line-through':''}">${s.type||''}</span>
             ${s.zone ? `<span class="ps-zone">${s.zone}</span>` : ''}
+            <span class="ps-status ${s.done?'done':''}">${s.done?'Fait':'À faire'}</span>
           </div>
+          <div class="ps-chips">
+            <span class="ps-chip">${s.duree||'Durée à ajuster'}</span>
+            <span class="ps-chip">${s.denivele_m?`${s.denivele_m} m+`:'D+ selon terrain'}</span>
+            ${s.distance_km ? `<span class="ps-chip">${s.distance_km} km</span>` : ''}
+          </div>
+          <div class="ps-objective">${escapeHtml(mainText)}</div>
+          <div class="ps-actions compact">
+            <button class="btn btn-g btn-sm" onclick="toggleSessionDetails('${extraId}')">Détail</button>
+            <button class="btn ${s.done?'btn-g':'btn-p'} btn-sm" onclick="${s.done ? `togglePlanSession(${id},${wi},${si})` : `openSessionFeedback('plan','Fait',${id},${wi},${si})`}">${s.done?'Fait':'Valider'}</button>
+            <button class="btn btn-g btn-sm" onclick="openSessionFeedback('plan','Trop dur',${id},${wi},${si})">Trop dur</button>
+            ${s.doneAt ? `<span style="font-size:11px;color:var(--text3);align-self:center">Fait le ${new Date(s.doneAt).toLocaleDateString('fr')}</span>` : ''}
+          </div>
+          <div class="ps-extra" id="${extraId}">
           <div class="ps-detail">
             <div class="ps-metric"><div class="ps-ml">Durée</div><div class="ps-mv">${s.duree||'À ajuster'}</div></div>
             <div class="ps-metric"><div class="ps-ml">Distance</div><div class="ps-mv">${s.distance_km?`${s.distance_km} km`:'Libre'}</div></div>
@@ -2878,23 +2934,16 @@ function viewPlan(id){
           </div>` : ''}
           ${s.conseil ? `<div class="ps-conseil"><strong>Conseil coach</strong><br>${s.conseil}</div>` : ''}
           ${sessionUnifiedCard(p, wi, si)}
-          <button class="ps-toggle" onclick="toggleSessionDetails('${extraId}')">Voir le déroulé recommandé</button>
-          <div class="ps-extra" id="${extraId}">
-            <div class="ps-ml">Déroulé recommandé</div>
+            <div class="ps-ml" style="margin-top:10px">Déroulé recommandé</div>
             <ol class="ps-steps">${steps.map(x => `<li>${x}</li>`).join('')}</ol>
             <div class="ps-feel">
               <div><label class="fl">Ressenti</label><select class="fi" onchange="updatePlanField(${id},${wi},${si},'feeling',this.value)"><option value="">Choisir</option>${['Très facile','Bien','Dur mais propre','Trop dur','Douleur / alerte'].map(v => `<option ${s.feeling===v?'selected':''}>${v}</option>`).join('')}</select></div>
               <div><label class="fl">Fatigue</label><select class="fi" onchange="updatePlanField(${id},${wi},${si},'fatigue',this.value)"><option value="">Choisir</option>${['Faible','Normale','Élevée','Très élevée'].map(v => `<option ${s.fatigue===v?'selected':''}>${v}</option>`).join('')}</select></div>
             </div>
-          </div>
-          <div class="ps-feedback">
-            <textarea class="fi" id="pf-${id}-${wi}-${si}" placeholder="Ressenti après séance : jambes, souffle, douleur, météo..." oninput="updatePlanFeedback(${id},${wi},${si},this.value)">${safeNote}</textarea>
-            <button class="btn ${s.done?'btn-g':'btn-p'} btn-sm" onclick="${s.done ? `togglePlanSession(${id},${wi},${si})` : `openSessionFeedback('plan','Fait',${id},${wi},${si})`}">${s.done?'Fait':'À faire'}</button>
-          </div>
-          <div class="ps-actions">
-            <button class="btn btn-g btn-sm" onclick="openSessionFeedback('plan','Fait',${id},${wi},${si})">Ajouter aux séances</button>
-            <button class="btn btn-g btn-sm" onclick="openSessionFeedback('plan','Trop dur',${id},${wi},${si})">Trop dur</button>
-            ${s.doneAt ? `<span style="font-size:11px;color:var(--text3);align-self:center">Fait le ${new Date(s.doneAt).toLocaleDateString('fr')}</span>` : ''}
+            <div class="ps-feedback">
+              <textarea class="fi" id="pf-${id}-${wi}-${si}" placeholder="Ressenti après séance : jambes, souffle, douleur, météo..." oninput="updatePlanFeedback(${id},${wi},${si},this.value)">${safeNote}</textarea>
+              <button class="btn btn-g btn-sm" onclick="openSessionFeedback('plan','Fait',${id},${wi},${si})">Ajouter aux séances</button>
+            </div>
           </div>
         </div>
       </div>`;
