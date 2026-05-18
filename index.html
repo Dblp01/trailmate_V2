@@ -163,6 +163,20 @@ button,input,select,textarea{font-family:'DM Sans',sans-serif}
 .coach-verdict-label{font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin-bottom:5px}
 .coach-verdict-value{font-size:12px;color:var(--text2);line-height:1.45}
 .coach-verdict-value strong{color:var(--text);font-size:13px}
+.coach-recap{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:15px}
+.coach-recap.warn{border-color:rgba(245,200,66,.28);background:linear-gradient(135deg,var(--ab),var(--bg2))}
+.coach-recap.hot{border-color:rgba(255,107,107,.28);background:linear-gradient(135deg,var(--rb),var(--bg2))}
+.coach-recap-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
+.coach-recap-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:800}
+.coach-recap-sub{font-size:12px;color:var(--text3);line-height:1.5;margin-top:4px}
+.coach-recap-status{font-size:11px;font-weight:800;border-radius:999px;padding:6px 10px;color:var(--g);background:var(--gb);border:1px solid var(--gbr);white-space:nowrap}
+.coach-recap.warn .coach-recap-status{color:var(--amber);background:var(--ab);border-color:rgba(245,200,66,.28)}
+.coach-recap.hot .coach-recap-status{color:var(--red);background:var(--rb);border-color:rgba(255,107,107,.28)}
+.coach-recap-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.coach-recap-cell{background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:12px;padding:10px}
+.coach-recap-label{font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin-bottom:5px}
+.coach-recap-value{font-size:12px;color:var(--text2);line-height:1.45}
+.coach-recap-value strong{color:var(--text);font-size:13px}
 .coach-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .coach-panel{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:15px}
 .coach-panel-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;margin-bottom:10px}
@@ -496,6 +510,7 @@ select.fi{cursor:pointer}
   .coach-badge{display:inline-flex;margin-top:10px}
   .coach-title{font-size:23px}
   .coach-verdict-grid{grid-template-columns:1fr 1fr}
+  .coach-recap-grid{grid-template-columns:1fr 1fr}
   .coach-grid,.coach-secondary{grid-template-columns:1fr}
   .coach-actions .btn{flex:1;justify-content:center}
   .mc{padding:11px 12px}
@@ -3633,6 +3648,7 @@ function renderCoachHome(){
   const completion = stats.total ? Math.round((stats.done / stats.total) * 100) : 0;
   const action = coachActionState(plan, next, adaptation, unlinked, feedbackNeed);
   const verdict = latestPlanVerdict(plan);
+  const weeklyRecap = plan ? coachWeeklyRecap(plan, week, planned, actual, adaptation, unlinked) : null;
   const days = race ? Math.ceil((new Date(race.date)-new Date())/86400000) : null;
   const weekRows = (week.items || []).slice(0,6).map((item,idx) => {
     const done = planSessionDone(plan, item);
@@ -3678,6 +3694,7 @@ function renderCoachHome(){
       </div>
     </div>
     ${coachVerdictHtml(verdict)}
+    ${coachWeeklyRecapHtml(weeklyRecap)}
     <div class="coach-grid">
       <div class="coach-panel">
         <div class="coach-panel-title">Aujourd’hui</div>
@@ -3791,6 +3808,106 @@ function coachVerdictHtml(verdict){
     </div>
     <div class="coach-action-text" style="margin-top:10px">${escapeHtml(verdict.decision)}</div>
     ${verdict.activityId ? `<div class="coach-actions"><button class="btn btn-g btn-sm" onclick="openActivityDetail('${jsStringArg(verdict.activityId)}')">Voir l’activité</button><button class="btn btn-g btn-sm" onclick="go('today')">Voir la suite</button></div>` : ''}
+  </div>`;
+}
+
+function pctDiff(actual, planned){
+  const a = Number(actual) || 0;
+  const p = Number(planned) || 0;
+  if(!p || !a) return 0;
+  return Math.round(((a - p) / p) * 100);
+}
+
+function signedPct(value){
+  const n = Number(value) || 0;
+  return `${n >= 0 ? '+' : ''}${n}%`;
+}
+
+function coachWeeklyRecap(plan, week, planned, actual, adaptation, unlinked){
+  if(!plan || !week?.items?.length) return null;
+  const total = week.items.length;
+  const done = actual.done || 0;
+  const donePct = total ? Math.round((done / total) * 100) : 0;
+  const minDiff = pctDiff(actual.min, planned.min);
+  const elevDiff = pctDiff(actual.elev, planned.elev);
+  const missingFeedback = week.items.filter(item => {
+    if(!planSessionDone(plan, item)) return false;
+    if(item.raw) return !(plan.data.rawLogs || []).some(l => String(l.week || '') === String(item.week || '') && String(l.name || '') === String(item.title || '') && (l.feeling || l.fatigue || l.notes));
+    return !(item.session?.feeling || item.session?.fatigue || item.session?.feedback);
+  }).length;
+  let cls = 'good';
+  let status = 'Semaine maîtrisée';
+  let risk = 'Charge cohérente';
+  let priority = 'Continuer sans compenser';
+  let action = 'Garde la séance suivante si sommeil, jambes et motivation sont corrects.';
+
+  if(adaptation){
+    cls = adaptation.status === 'Douleur / alerte' ? 'hot' : 'warn';
+    status = 'Adaptation conseillée';
+    risk = adaptation.title;
+    priority = 'Ajuster la suite';
+    action = adaptation.nextAction || adaptation.advice || action;
+  } else if(minDiff >= 25 || elevDiff >= 35){
+    cls = 'warn';
+    status = 'Charge au-dessus';
+    risk = `Surcharge possible (${[planned.min ? `durée ${signedPct(minDiff)}` : '', planned.elev ? `D+ ${signedPct(elevDiff)}` : ''].filter(Boolean).join(' · ')})`;
+    priority = 'Récupération';
+    action = 'Garde la prochaine séance facile ou raccourcie si les jambes sont lourdes.';
+  } else if(donePct < 50 && total > 1){
+    cls = 'warn';
+    status = 'Semaine incomplète';
+    risk = 'Sous-charge ou manque de suivi';
+    priority = 'Reprendre normalement';
+    action = 'Ne rattrape pas tout d’un coup. Fais la prochaine séance prévue, simple et propre.';
+  } else if(missingFeedback){
+    cls = 'warn';
+    status = 'Ressenti manquant';
+    risk = `${missingFeedback} séance${missingFeedback > 1 ? 's' : ''} sans retour terrain`;
+    priority = 'Compléter le ressenti';
+    action = 'Ajoute jambes, souffle, douleur et sommeil pour que le coach adapte mieux.';
+  } else if(unlinked.length){
+    cls = 'warn';
+    status = 'Strava à relier';
+    risk = `${unlinked.length} activité${unlinked.length > 1 ? 's' : ''} non associée${unlinked.length > 1 ? 's' : ''}`;
+    priority = 'Relier les séances';
+    action = 'Associe les activités au plan pour fiabiliser durée, D+ et charge réelle.';
+  }
+
+  return {
+    cls,
+    status,
+    title:`Bilan semaine ${week.week || '?'}`,
+    subtitle:`${done}/${total} séance${total > 1 ? 's' : ''} suivie${done > 1 ? 's' : ''}`,
+    planned:[minutesLabel(planned.min), planned.elev ? `${planned.elev} m+` : 'D+ libre'].join(' · '),
+    actual:[minutesLabel(actual.min), actual.elev ? `${actual.elev} m+` : 'D+ -'].join(' · '),
+    gap:[planned.min ? `durée ${signedPct(minDiff)}` : '', planned.elev ? `D+ ${signedPct(elevDiff)}` : '', `${donePct}% séances`].filter(Boolean).join(' · '),
+    risk,
+    priority,
+    action
+  };
+}
+
+function coachWeeklyRecapHtml(recap){
+  if(!recap) return '';
+  return `<div class="coach-recap ${recap.cls}">
+    <div class="coach-recap-head">
+      <div>
+        <div class="coach-recap-title">${escapeHtml(recap.title)}</div>
+        <div class="coach-recap-sub">${escapeHtml(recap.subtitle)}</div>
+      </div>
+      <div class="coach-recap-status">${escapeHtml(recap.status)}</div>
+    </div>
+    <div class="coach-recap-grid">
+      <div class="coach-recap-cell"><div class="coach-recap-label">Prévu</div><div class="coach-recap-value"><strong>${escapeHtml(recap.planned)}</strong></div></div>
+      <div class="coach-recap-cell"><div class="coach-recap-label">Réalisé</div><div class="coach-recap-value"><strong>${escapeHtml(recap.actual)}</strong></div></div>
+      <div class="coach-recap-cell"><div class="coach-recap-label">Écart</div><div class="coach-recap-value">${escapeHtml(recap.gap)}</div></div>
+      <div class="coach-recap-cell"><div class="coach-recap-label">Priorité</div><div class="coach-recap-value"><strong>${escapeHtml(recap.priority)}</strong></div></div>
+    </div>
+    <div class="coach-action-text" style="margin-top:10px"><strong>${escapeHtml(recap.risk)}</strong><br>${escapeHtml(recap.action)}</div>
+    <div class="coach-actions">
+      <button class="btn btn-g btn-sm" onclick="go('today')">Voir la semaine</button>
+      <button class="btn btn-g btn-sm" onclick="generateWeeklyBrief()">Bilan IA détaillé</button>
+    </div>
   </div>`;
 }
 
