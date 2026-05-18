@@ -431,6 +431,23 @@ select.fi{cursor:pointer}
 .week-item.done .wi-dot{background:var(--g);color:#0d1a00}
 .wi-title{font-size:13px;font-weight:800;color:var(--text)}
 .wi-meta{font-size:11px;color:var(--text3);margin-top:1px}
+.train-cal{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:14px;margin-bottom:14px}
+.train-cal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:12px}
+.train-cal-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:800}
+.train-cal-sub{font-size:12px;color:var(--text3);line-height:1.45;margin-top:3px}
+.train-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}
+.train-day{min-height:112px;background:var(--bg3);border:1px solid var(--border);border-radius:13px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.train-day.today{border-color:var(--gbr);background:linear-gradient(135deg,var(--gb),var(--bg3))}
+.train-day.done{border-color:var(--gbr)}
+.train-day-head{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.train-day-name{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;font-weight:800}
+.train-day-date{font-family:'Syne',sans-serif;font-size:16px;font-weight:800;color:var(--text)}
+.train-day-main{font-size:12px;font-weight:800;color:var(--text);line-height:1.3}
+.train-day-meta{font-size:11px;color:var(--text3);line-height:1.35}
+.train-day-chip{display:inline-flex;align-items:center;align-self:flex-start;border:1px solid var(--border);border-radius:999px;padding:3px 7px;font-size:10px;color:var(--text3);font-weight:800}
+.train-day.done .train-day-chip{color:var(--g);background:var(--gb);border-color:var(--gbr)}
+.train-day.empty{opacity:.62}
+.train-day-actions{margin-top:auto;display:flex;gap:6px;flex-wrap:wrap}
 .adapt-card{background:var(--ab);border:1px solid rgba(245,200,66,.25);border-radius:var(--r);padding:13px;margin-bottom:12px;color:var(--text2);font-size:13px;line-height:1.65}
 .adapt-card strong{color:var(--amber)}
 .adapt-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
@@ -536,6 +553,8 @@ select.fi{cursor:pointer}
   .raw-session-title{font-size:13px}
   .raw-follow-grid{grid-template-columns:1fr}
   .week-grid{grid-template-columns:1fr}
+  .train-cal-grid{grid-template-columns:1fr}
+  .train-day{min-height:0}
   .week-metrics{grid-template-columns:repeat(2,1fr)}
   .today-actions{grid-template-columns:1fr}
   .feedback-grid{grid-template-columns:1fr}
@@ -2681,6 +2700,82 @@ function dismissAdaptation(planId){
   renderToday();
 }
 
+function dateKey(date){
+  const d = new Date(date);
+  if(Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function addDays(date, days){
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function planItemDayIndex(item, fallbackIndex){
+  const txt = `${item?.title || ''} ${item?.body || ''}`.toLowerCase();
+  const map = [
+    ['dim', 0], ['lun', 1], ['mar', 2], ['mer', 3], ['jeu', 4], ['ven', 5], ['sam', 6]
+  ];
+  const found = map.find(([needle]) => txt.includes(needle));
+  if(found) return found[1];
+  return fallbackIndex % 7;
+}
+
+function trainingCalendarHtml(plan, week){
+  if(!plan || !week?.items?.length) return '';
+  const today = new Date();
+  const start = addDays(today, -((today.getDay() + 6) % 7));
+  const dayNames = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
+  const slots = Array.from({ length:7 }, (_, idx) => {
+    const date = addDays(start, idx);
+    return { date, key:dateKey(date), items:[], activities:[] };
+  });
+  (week.items || []).forEach((item, idx) => {
+    const dayIndex = planItemDayIndex(item, idx);
+    const mondayBased = dayIndex === 0 ? 6 : dayIndex - 1;
+    slots[mondayBased]?.items.push(item);
+  });
+  DB.sessions
+    .filter(s => slots.some(day => day.key === dateKey(s.date)))
+    .forEach(s => {
+      const slot = slots.find(day => day.key === dateKey(s.date));
+      if(slot) slot.activities.push(s);
+    });
+  const todayKey = dateKey(today);
+  const daysHtml = slots.map(slot => {
+    const item = slot.items[0] || null;
+    const activity = item ? weekItemActual(plan, item) : slot.activities[0] || null;
+    const done = item ? planSessionDone(plan, item) : !!activity;
+    const title = item?.title || activity?.type || 'Repos / libre';
+    const meta = item
+      ? [item.duration, item.elev ? `${item.elev} m+` : '', activity ? `réalisé ${activity.dur || minutesLabel(Math.round(activityDurationSeconds(activity)/60))}` : ''].filter(Boolean).join(' · ')
+      : activity ? [activity.km ? `${activity.km} km` : '', activity.elev ? `${activity.elev} m+` : '', activity.hr ? `${activity.hr} bpm` : ''].filter(Boolean).join(' · ') : 'Aucune séance prévue';
+    return `<div class="train-day ${slot.key === todayKey ? 'today' : ''} ${done ? 'done' : ''} ${!item && !activity ? 'empty' : ''}">
+      <div class="train-day-head">
+        <div class="train-day-name">${dayNames[slot.date.getDay()]}</div>
+        <div class="train-day-date">${slot.date.getDate()}</div>
+      </div>
+      <div class="train-day-main">${escapeHtml(title)}</div>
+      <div class="train-day-meta">${escapeHtml(meta)}</div>
+      <span class="train-day-chip">${done ? 'Fait' : item ? 'À faire' : 'Libre'}</span>
+      <div class="train-day-actions">
+        ${activity ? `<button class="btn btn-g btn-sm" onclick="openActivityDetail('${jsStringArg(activity.id)}')">Voir</button>` : item ? `<button class="btn btn-g btn-sm" onclick="viewPlan(${plan.id})">Plan</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="train-cal">
+    <div class="train-cal-head">
+      <div>
+        <div class="train-cal-title">Calendrier 7 jours</div>
+        <div class="train-cal-sub">Séances prévues, activités reliées et jours libres au même endroit.</div>
+      </div>
+      <button class="btn btn-g btn-sm" onclick="syncStrava()">Sync Strava</button>
+    </div>
+    <div class="train-cal-grid">${daysHtml}</div>
+  </div>`;
+}
+
 function renderToday(){
   const el = document.getElementById('today-content');
   if(!el) return;
@@ -2712,7 +2807,8 @@ function renderToday(){
     : remaining.length
       ? `Il reste ${remaining.length} séance${remaining.length > 1 ? 's' : ''}. Continue sans compenser, en gardant le ressenti prioritaire.`
       : 'Semaine complétée. Ajoute tes ressentis puis laisse le coach préparer la suite.';
-  el.innerHTML = `<div class="week-grid">
+  el.innerHTML = `${trainingCalendarHtml(plan, week)}
+  <div class="week-grid">
     <div class="week-board">
       <div class="today-kicker">${escapeHtml(plan.name || 'Plan actif')}</div>
       <div class="week-title">Semaine ${escapeHtml(week.week)}</div>
